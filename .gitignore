@@ -1,0 +1,6 @@
+.env
+mvp0.0.md
+diagram/
+__pycache__/
+.venv/
+workspace/
