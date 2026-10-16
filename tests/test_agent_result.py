@@ -84,6 +84,14 @@ def test_agent_returns_failure_json_and_stops_current_tool_batch(
 
     assert agent.run("测试失败") == "已处理失败"
     assert executions == ["fail"]
+    events = agent.last_trace.get_events()
+    started = next(event for event in events if event["event"] == "task_started")
+    finished = next(
+        event for event in events if event["event"] == "tool_call_finished"
+    )
+    assert started["details"]["workspace"] == str(tmp_path)
+    assert finished["details"]["status"] == "failure"
+    assert finished["details"]["error"] == "boom"
 
 
 def test_agent_returns_cancelled_json_and_continues(monkeypatch, tmp_path: Path):
