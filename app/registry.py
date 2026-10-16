@@ -5,9 +5,10 @@ from enum import StrEnum
 from typing import Any
 
 from app import tools
+from app.result import ToolResult
 from app.validation import ToolArgumentValidationError, validate_tool_arguments
 
-ToolExecutor = Callable[..., str]
+ToolExecutor = Callable[..., str | ToolResult]
 
 
 class RiskLevel(StrEnum):
@@ -74,26 +75,47 @@ class ToolRegistry:
 
         return [spec.to_model_definition() for spec in self._tools.values()]
 
-    def execute(self, name: str, arguments: object) -> str:
+    def execute(self, name: str, arguments: object) -> ToolResult:
         """通过注册表查找并执行工具。"""
 
         spec = self.get(name)
         if spec is None:
-            return f"错误：不支持的工具：{name}"
+            return ToolResult.failure(f"不支持的工具：{name}")
 
         try:
             validated_arguments = validate_tool_arguments(
                 spec.parameters, arguments
             )
         except ToolArgumentValidationError as exc:
-            return f"错误：工具参数校验失败：{exc}"
+            return ToolResult.failure(f"工具参数校验失败：{exc}")
 
         try:
-            return spec.executor(**validated_arguments)
+            output = spec.executor(**validated_arguments)
         except TypeError as exc:
-            return f"错误：工具参数不正确：{exc}"
+            return ToolResult.failure(f"工具参数不正确：{exc}")
         except Exception as exc:  # noqa: BLE001 - 注册表是工具异常边界
-            return f"错误：工具执行异常：{exc}"
+            return ToolResult.failure(f"工具执行异常：{exc}")
+
+        return self._normalize_output(output)
+
+    def execute_text(self, name: str, arguments: object) -> str:
+        """为尚未适配结构化结果的 Agent 返回旧文本格式。"""
+
+        return self.execute(name, arguments).to_legacy_text()
+
+    @staticmethod
+    def _normalize_output(output: str | ToolResult) -> ToolResult:
+        if isinstance(output, ToolResult):
+            return output
+        if not isinstance(output, str):
+            return ToolResult.failure("工具返回了不支持的结果类型。")
+        if output.startswith("错误："):
+            return ToolResult.failure(output.removeprefix("错误："))
+        if any(line.startswith("已取消") for line in output.splitlines()):
+            return ToolResult.cancelled(output)
+        if any(line.startswith("无法删除目录") for line in output.splitlines()):
+            return ToolResult.failure(output)
+        return ToolResult.success(output)
 
 
 TOOL_RISK_LEVELS = {
