@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Any
 
 from app import tools
+from app.validation import ToolArgumentValidationError, validate_tool_arguments
 
 ToolExecutor = Callable[..., str]
 
@@ -73,7 +74,7 @@ class ToolRegistry:
 
         return [spec.to_model_definition() for spec in self._tools.values()]
 
-    def execute(self, name: str, arguments: dict[str, Any]) -> str:
+    def execute(self, name: str, arguments: object) -> str:
         """通过注册表查找并执行工具。"""
 
         spec = self.get(name)
@@ -81,7 +82,14 @@ class ToolRegistry:
             return f"错误：不支持的工具：{name}"
 
         try:
-            return spec.executor(**arguments)
+            validated_arguments = validate_tool_arguments(
+                spec.parameters, arguments
+            )
+        except ToolArgumentValidationError as exc:
+            return f"错误：工具参数校验失败：{exc}"
+
+        try:
+            return spec.executor(**validated_arguments)
         except TypeError as exc:
             return f"错误：工具参数不正确：{exc}"
         except Exception as exc:  # noqa: BLE001 - 注册表是工具异常边界
