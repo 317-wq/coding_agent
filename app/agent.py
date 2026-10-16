@@ -3,6 +3,7 @@ import json
 
 from openai.types.chat import ChatCompletionMessageParam
 
+from app.explorer import ProjectExplorer
 from app.model import ModelAdapter
 from app.tools import TOOL_DEFINITIONS, execute_tool, set_workspace
 from app.trace import ExecutionTrace
@@ -58,11 +59,20 @@ class Agent:
         trace = ExecutionTrace()
         self.last_trace = trace
         trace.record("task_started", task=task)
+        project_snapshot = ProjectExplorer(self.workspace).explore()
 
         messages: list[ChatCompletionMessageParam] = [
             {
                 "role": "system",
                 "content": SYSTEM_PROMPT.format(workspace=self.workspace.root),
+            },
+            {
+                "role": "system",
+                "content": (
+                    "以下是任务开始时自动生成的项目快照。"
+                    "它只用于初步定位，修改前仍需读取相关文件：\n"
+                    f"{project_snapshot.to_prompt()}"
+                ),
             },
             {
                 "role": "user",
