@@ -1,0 +1,102 @@
+%% 当前 app 模块关系与执行流程
+%% 对应 app/main.py、agent.py、model.py、tools.py、config.py、trace.py
+flowchart LR
+    User([用户])
+
+    subgraph CLI[交互入口]
+        Main[main.py<br/>CLI 任务循环]
+        Input{输入任务}
+        Exit{exit / quit?}
+    end
+
+    subgraph Core[Agent 核心控制]
+        Agent[agent.py<br/>Agent.run]
+        Prompt[系统提示词<br/>工具使用规则]
+        Loop[多轮执行循环<br/>max_steps / max_tool_calls]
+        Decision{模型是否调用工具?}
+        Final[返回任务总结]
+        Stop[停止 / 失败<br/>中断、上限或模型错误]
+    end
+
+    subgraph Model[模型适配]
+        Adapter[model.py<br/>ModelAdapter]
+        Client[OpenAI 兼容客户端]
+        Qwen[Qwen Chat Model]
+        Settings[config.py<br/>Settings + .env]
+    end
+
+    subgraph Tools[工具系统]
+        Definitions[TOOL_DEFINITIONS<br/>工具定义与参数描述]
+        Execute[execute_tool<br/>统一工具分发]
+        FileTools[文件工具<br/>list / read / create / edit]
+        Search[search_code<br/>rg 搜索]
+        Tests[run_tests<br/>pytest 执行]
+        Delete[delete_file / delete_directory<br/>逐项确认删除]
+        Boundary[_resolve_path<br/>工作区边界与符号链接限制]
+        Sandbox[(workspace/demo<br/>受控沙箱)]
+    end
+
+    subgraph Trace[执行追踪]
+        Execution[trace.py<br/>ExecutionTrace]
+        Sanitize[敏感信息清理<br/>密钥、.env、长度、深度]
+        Summary[Trace Summary<br/>状态、耗时、模型请求、工具统计]
+    end
+
+    User --> Main
+    Main --> Input
+    Input --> Exit
+    Exit -->|是| End([程序退出])
+    Exit -->|否| Agent
+
+    Agent --> Prompt
+    Agent --> Loop
+    Loop --> Adapter
+    Adapter --> Settings
+    Settings --> Adapter
+    Adapter --> Client
+    Client --> Qwen
+    Qwen --> Adapter
+    Adapter --> Decision
+    Decision -->|否| Final
+    Decision -->|是| Definitions
+    Definitions --> Loop
+    Loop --> Execute
+    Execute --> FileTools
+    Execute --> Search
+    Execute --> Tests
+    Execute --> Delete
+    FileTools --> Boundary
+    Search --> Boundary
+    Tests --> Boundary
+    Delete --> Boundary
+    Boundary --> Sandbox
+    Sandbox --> Execute
+    Execute --> Loop
+    Loop -->|达到上限或发生错误| Stop
+    Stop --> Summary
+    Final --> Summary
+    Summary --> Main
+    Main --> User
+
+    Agent -.记录任务、模型请求、工具事件.-> Execution
+    Execute -.记录工具执行结果.-> Execution
+    Stop -.记录失败或停止原因.-> Execution
+    Final -.记录完成结果.-> Execution
+    Execution --> Sanitize
+    Sanitize --> Summary
+
+    classDef entry fill:#E8F1FB,stroke:#3B82F6,color:#172554,stroke-width:1.5px;
+    classDef core fill:#E8F7EF,stroke:#22C55E,color:#14532D,stroke-width:1.5px;
+    classDef model fill:#FFF4E5,stroke:#F59E0B,color:#78350F,stroke-width:1.5px;
+    classDef tools fill:#F3E8FF,stroke:#A855F7,color:#581C87,stroke-width:1.5px;
+    classDef trace fill:#FCE7F3,stroke:#EC4899,color:#831843,stroke-width:1.5px;
+    classDef storage fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-width:1.5px;
+    classDef decision fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:1.5px;
+
+    class Main,Input,Exit entry;
+    class Agent,Prompt,Loop,Final,Stop core;
+    class Adapter,Client,Qwen,Settings model;
+    class Definitions,Execute,FileTools,Search,Tests,Delete,Boundary tools;
+    class Execution,Sanitize,Summary trace;
+    class Sandbox,User,End storage;
+    class Decision decision;
