@@ -5,7 +5,8 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from app.explorer import ProjectExplorer
 from app.model import ModelAdapter
-from app.tools import TOOL_DEFINITIONS, execute_tool, set_workspace
+from app.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
+from app.tools import set_workspace
 from app.trace import ExecutionTrace
 from app.workspace import WorkspaceContext
 
@@ -39,8 +40,10 @@ class Agent:
         workspace: WorkspaceContext,
         max_steps: int = 10,
         max_tool_calls: int = 20,
+        registry: ToolRegistry = DEFAULT_TOOL_REGISTRY,
     ) -> None:
         self.workspace = workspace
+        self.registry = registry
         set_workspace(workspace)
         self.model = ModelAdapter()
         self.max_steps = max_steps
@@ -89,7 +92,7 @@ class Agent:
             try:
                 response = self.model.chat(
                     messages=messages,
-                    tools=TOOL_DEFINITIONS,
+                    tools=self.registry.model_definitions(),
                 )
             except KeyboardInterrupt:
                 trace.record(
@@ -212,7 +215,7 @@ class Agent:
                 )
 
                 try:
-                    result = execute_tool(tool_name, arguments)
+                    result = self.registry.execute(tool_name, arguments)
                 except KeyboardInterrupt:
                     trace.record(
                         "task_stopped",
