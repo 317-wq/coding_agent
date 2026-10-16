@@ -62,7 +62,11 @@ class Agent:
 
         trace = ExecutionTrace()
         self.last_trace = trace
-        trace.record("task_started", task=task)
+        trace.record(
+            "task_started",
+            task=task,
+            workspace=str(self.workspace.root),
+        )
         project_snapshot = ProjectExplorer(self.workspace).explore()
 
         messages: list[ChatCompletionMessageParam] = [
@@ -191,6 +195,7 @@ class Agent:
                     trace.record(
                         "tool_arguments_invalid",
                         tool=tool_name,
+                        status=tool_result.status.value,
                         error=str(exc),
                     )
                     print(
