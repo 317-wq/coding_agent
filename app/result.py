@@ -55,10 +55,3 @@ class ToolResult:
         """序列化为可回传模型的 JSON 文本。"""
 
         return json.dumps(self.to_dict(), ensure_ascii=False)
-
-    def to_legacy_text(self) -> str:
-        """在 Agent 完成结构化结果适配前提供文本兼容。"""
-
-        if self.status is ToolStatus.FAILURE:
-            return f"错误：{self.error}"
-        return self.result or ""
