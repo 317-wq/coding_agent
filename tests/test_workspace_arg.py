@@ -8,7 +8,7 @@ from app import main
 def test_parse_args_uses_workspace(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("sys.argv", ["coding-agent", "--workspace", str(tmp_path)])
 
-    assert main._parse_args() == tmp_path.resolve()
+    assert main._parse_args().root == tmp_path.resolve()
 
 
 def test_parse_args_rejects_missing_workspace(monkeypatch, tmp_path: Path):
