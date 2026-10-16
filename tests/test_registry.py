@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -121,7 +122,12 @@ def test_agent_uses_injected_registry_for_definition_and_execution(
                 tool_call = SimpleNamespace(id="call-1", function=function)
                 message = SimpleNamespace(content=None, tool_calls=[tool_call])
             else:
-                assert messages[-1]["content"] == "hello"
+                content = json.loads(messages[-1]["content"])
+                assert content == {
+                    "status": "success",
+                    "result": "hello",
+                    "error": None,
+                }
                 message = SimpleNamespace(content="完成", tool_calls=None)
             return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
