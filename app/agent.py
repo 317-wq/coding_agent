@@ -215,7 +215,7 @@ class Agent:
                 )
 
                 try:
-                    result = self.registry.execute(tool_name, arguments)
+                    result = self.registry.execute_text(tool_name, arguments)
                 except KeyboardInterrupt:
                     trace.record(
                         "task_stopped",
