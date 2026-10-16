@@ -8,11 +8,11 @@ from app.tools import TOOL_DEFINITIONS, execute_tool, set_workspace
 from app.trace import ExecutionTrace
 from app.workspace import WorkspaceContext
 
-
 SYSTEM_PROMPT = """
 你是一个能够实际编写和修改 Python 代码的 Coding Agent。
 
-你的工作目录是 workspace/demo，所有文件操作都必须通过提供的工具完成。
+你的受控工作区是：{workspace}
+所有文件路径都必须相对于该工作区，并通过提供的工具操作。
 
 工作规则：
 1. 先查看工作区，了解现有目录和文件，不要假设文件内容。
@@ -35,9 +35,12 @@ class Agent:
 
     def __init__(
         self,
+        workspace: WorkspaceContext,
         max_steps: int = 10,
         max_tool_calls: int = 20,
     ) -> None:
+        self.workspace = workspace
+        set_workspace(workspace)
         self.model = ModelAdapter()
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
@@ -59,7 +62,7 @@ class Agent:
         messages: list[ChatCompletionMessageParam] = [
             {
                 "role": "system",
-                "content": SYSTEM_PROMPT,
+                "content": SYSTEM_PROMPT.format(workspace=self.workspace.root),
             },
             {
                 "role": "user",
