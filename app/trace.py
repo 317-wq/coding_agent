@@ -1,9 +1,8 @@
 
 import json
-from datetime import datetime, timezone
-from typing import Any
 import re
-
+from datetime import UTC, datetime
+from typing import Any
 
 MAX_STRING_LENGTH = 2000
 MAX_ITEMS = 50
@@ -53,16 +52,26 @@ BEARER_PATTERN = re.compile(
     r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"
 )
 
+SENSITIVE_FILE_PATTERN = re.compile(
+    r'''(?ix)
+    (?<![\w.-])
+    (?:[^\s"'=,;<>]*[/\\])?
+    \.env(?:\.(?:local|production|development))?
+    (?![\w.-])
+    '''
+)
+
 
 def _sanitize_string(value: str) -> str:
     """过滤常见密钥形式，并限制字符串长度。"""
+    value = BEARER_PATTERN.sub(f"Bearer {REDACTED}", value)
     value = SECRET_VALUE_PATTERN.sub(
         lambda match: (
             f"{match.group(1)}{match.group(2)}{REDACTED}"
         ),
         value,
     )
-    value = BEARER_PATTERN.sub(f"Bearer {REDACTED}", value)
+    value = SENSITIVE_FILE_PATTERN.sub(REDACTED, value)
 
     if len(value) > MAX_STRING_LENGTH:
         value = value[:MAX_STRING_LENGTH] + TRUNCATED
@@ -86,15 +95,13 @@ def _sanitize(
         "file_path",
         "filepath",
         "filename",
-    }:
-        if isinstance(value, str):
-            file_name = value.replace("\\", "/").rsplit("/", 1)[-1]
-            if file_name in SENSITIVE_FILE_NAMES:
-                return REDACTED
+    } and isinstance(value, str):
+        file_name = value.replace("\\", "/").rsplit("/", 1)[-1]
+        if file_name in SENSITIVE_FILE_NAMES:
+            return REDACTED
 
-    if depth >= MAX_DEPTH:
-        if isinstance(value, (dict, list, tuple)):
-            return TRUNCATED
+    if depth >= MAX_DEPTH and isinstance(value, (dict, list, tuple)):
+        return TRUNCATED
 
     if isinstance(value, str):
         return _sanitize_string(value)
@@ -145,7 +152,7 @@ class ExecutionTrace:
         safe_details = _sanitize(details)
 
         event = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "event": _sanitize_string(event_type),
             "details": safe_details,
         }
@@ -188,7 +195,7 @@ class ExecutionTrace:
             return None
 
         if end_time is None:
-            end_time = datetime.now(timezone.utc)
+            end_time = datetime.now(UTC)
 
         return round((end_time - start_time).total_seconds(), 3)
 
@@ -218,7 +225,7 @@ class ExecutionTrace:
         return "not_started", None
 
     def _get_tool_statistics(self) -> dict[str, int]:
-        """统计工具调用次数、成功次数和失败次数。"""
+        """按结构化状态统计工具调用结果。"""
         started = sum(
             event["event"] == "tool_call_started"
             for event in self.events
@@ -226,12 +233,28 @@ class ExecutionTrace:
 
         succeeded = 0
         failed = 0
+        cancelled = 0
+        finished = 0
 
         for event in self.events:
             if event["event"] != "tool_call_finished":
                 continue
 
+            finished += 1
             details = event["details"]
+            status = details.get("status")
+
+            if status == "success":
+                succeeded += 1
+                continue
+            if status == "failure":
+                failed += 1
+                continue
+            if status == "cancelled":
+                cancelled += 1
+                continue
+
+            # 兼容旧 Trace 事件，后续可在版本迁移完成后移除。
             result = details.get("result", "")
             is_error = details.get("is_error")
 
@@ -248,11 +271,21 @@ class ExecutionTrace:
 
         return {
             "calls_started": started,
-            "calls_finished": succeeded + failed,
+            "calls_finished": finished,
             "succeeded": succeeded,
             "failed": failed,
-            "unfinished": max(0, started - succeeded - failed),
+            "cancelled": cancelled,
+            "unfinished": max(0, started - finished),
         }
+
+    def _get_workspace(self) -> str | None:
+        """返回任务启动事件中记录的受控工作区。"""
+
+        for event in self.events:
+            if event["event"] == "task_started":
+                workspace = event["details"].get("workspace")
+                return workspace if isinstance(workspace, str) else None
+        return None
 
     def get_statistics(self) -> dict[str, Any]:
         """返回任务耗时、模型请求、工具调用和结束状态统计。"""
@@ -261,6 +294,7 @@ class ExecutionTrace:
         return {
             "status": status,
             "stop_reason": reason,
+            "workspace": self._get_workspace(),
             "duration_seconds": self._get_duration(),
             "model_requests": sum(
                 event["event"] == "model_request_started"
