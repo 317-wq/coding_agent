@@ -1,6 +1,7 @@
 import pytest
 
 from app.registry import ToolRegistry, ToolSpec
+from app.result import ToolStatus
 from app.validation import ToolArgumentValidationError, validate_tool_arguments
 
 SCHEMA = {
@@ -77,5 +78,6 @@ def test_registry_does_not_call_executor_when_validation_fails():
 
     result = registry.execute("read", {"unexpected": "value"})
 
-    assert result.startswith("错误：工具参数校验失败：")
+    assert result.status is ToolStatus.FAILURE
+    assert result.error.startswith("工具参数校验失败：")
     assert calls == []
