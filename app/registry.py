@@ -113,11 +113,6 @@ class ToolRegistry:
 
         return self._normalize_output(output)
 
-    def execute_text(self, name: str, arguments: object) -> str:
-        """为尚未适配结构化结果的 Agent 返回旧文本格式。"""
-
-        return self.execute(name, arguments).to_legacy_text()
-
     @staticmethod
     def _normalize_output(output: str | ToolResult) -> ToolResult:
         if isinstance(output, ToolResult):
