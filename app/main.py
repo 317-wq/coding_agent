@@ -3,9 +3,10 @@ from pathlib import Path
 
 from app import tools
 from app.agent import Agent
+from app.workspace import WorkspaceContext
 
 
-def _parse_args() -> Path:
+def _parse_args() -> WorkspaceContext:
     parser = argparse.ArgumentParser(description="Mini Coding Agent")
     parser.add_argument(
         "--workspace",
@@ -14,30 +15,24 @@ def _parse_args() -> Path:
         help="Agent 工作区路径，默认为 workspace/demo",
     )
     args = parser.parse_args()
-    workspace = args.workspace.expanduser()
-
-    if not workspace.exists():
-        parser.error(f"工作区不存在：{workspace}")
-
-    if not workspace.is_dir():
-        parser.error(f"工作区不是目录：{workspace}")
-
-    return workspace.resolve()
+    try:
+        return WorkspaceContext.from_path(args.workspace)
+    except ValueError as exc:
+        parser.error(str(exc))
 
 
 def main() -> None:
     """程序入口。"""
 
     workspace = _parse_args()
-    tools.WORKSPACE = workspace
 
     print("=" * 50)
     print("Mini Coding Agent")
-    print(f"工作目录：{workspace}")
+    print(f"工作目录：{workspace.root}")
     print("输入 exit 或 quit 退出程序")
     print("=" * 50)
 
-    agent = Agent()
+    agent = Agent(workspace=workspace)
 
     while True:
         try:
