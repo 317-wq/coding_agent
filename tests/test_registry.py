@@ -11,6 +11,7 @@ from app.registry import (
     ToolRegistry,
     ToolSpec,
 )
+from app.result import ToolResult, ToolStatus
 from app.workspace import WorkspaceContext
 
 
@@ -42,7 +43,8 @@ def test_registry_stores_complete_tool_spec_and_executes_it():
 
     assert registry.get("echo") is spec
     assert registry.names() == ("echo",)
-    assert registry.execute("echo", {"value": "hello"}) == "hello"
+    result = registry.execute("echo", {"value": "hello"})
+    assert result == ToolResult.success("hello")
     assert registry.model_definitions() == [spec.to_model_definition()]
 
 
@@ -61,7 +63,25 @@ def test_registry_rejects_duplicate_tool_name():
 def test_registry_returns_error_for_unknown_tool():
     registry = ToolRegistry()
 
-    assert registry.execute("missing", {}) == "错误：不支持的工具：missing"
+    result = registry.execute("missing", {})
+
+    assert result.status is ToolStatus.FAILURE
+    assert result.error == "不支持的工具：missing"
+
+
+@pytest.mark.parametrize(
+    ("output", "status"),
+    [
+        ("完成", ToolStatus.SUCCESS),
+        ("错误：失败", ToolStatus.FAILURE),
+        ("已取消删除：demo.txt", ToolStatus.CANCELLED),
+    ],
+)
+def test_registry_normalizes_legacy_tool_output(output, status):
+    registry = ToolRegistry()
+    registry.register(make_spec(executor=lambda value: output))
+
+    assert registry.execute("echo", {"value": "x"}).status is status
 
 
 def test_default_registry_contains_every_builtin_tool():
