@@ -6,6 +6,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from app.explorer import ProjectExplorer
 from app.model import ModelAdapter
 from app.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
+from app.result import ToolResult, ToolStatus
 from app.tools import set_workspace
 from app.trace import ExecutionTrace
 from app.workspace import WorkspaceContext
@@ -184,19 +185,24 @@ class Agent:
                         raise ValueError("工具参数必须是 JSON 对象。")
 
                 except (json.JSONDecodeError, ValueError) as exc:
-                    result = f"工具参数解析失败：{exc}"
+                    tool_result = ToolResult.failure(
+                        f"工具参数解析失败：{exc}"
+                    )
                     trace.record(
                         "tool_arguments_invalid",
                         tool=tool_name,
                         error=str(exc),
                     )
-                    print(f"[Tool Error] {tool_name}: {result}")
+                    print(
+                        f"[Tool Error] {tool_name}: "
+                        f"{tool_result.to_json()}"
+                    )
 
                     messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": tool_call.id,
-                            "content": result,
+                            "content": tool_result.to_json(),
                         }
                     )
 
@@ -215,7 +221,7 @@ class Agent:
                 )
 
                 try:
-                    result = self.registry.execute_text(tool_name, arguments)
+                    tool_result = self.registry.execute(tool_name, arguments)
                 except KeyboardInterrupt:
                     trace.record(
                         "task_stopped",
@@ -225,7 +231,9 @@ class Agent:
                     self._print_trace_summary(trace)
                     raise
                 except Exception as exc:
-                    result = f"错误：工具执行异常：{exc}"
+                    tool_result = ToolResult.failure(
+                        f"工具执行异常：{exc}"
+                    )
 
                 tool_call_count += 1
 
@@ -233,21 +241,24 @@ class Agent:
                     "tool_call_finished",
                     tool=tool_name,
                     tool_call_id=tool_call.id,
-                    result=result,
-                    is_error=result.startswith("错误："),
+                    status=tool_result.status.value,
+                    result=tool_result.result,
+                    error=tool_result.error,
+                    is_error=tool_result.status is ToolStatus.FAILURE,
                 )
-                print(f"[Tool Result] {result[:500]}")
+                result_json = tool_result.to_json()
+                print(f"[Tool Result] {result_json[:500]}")
 
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": result,
+                        "content": result_json,
                     }
                 )
 
                 # 工具返回错误时，停止本批次剩余调用，交由模型重新判断。
-                if result.startswith("错误："):
+                if tool_result.status is ToolStatus.FAILURE:
                     break
 
         trace.record(
