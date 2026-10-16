@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Any
 
 from app import tools
+from app.authorization import ConsoleAuthorizer, ToolAuthorizer
 from app.result import ToolResult
 from app.validation import ToolArgumentValidationError, validate_tool_arguments
 
@@ -45,8 +46,9 @@ class ToolSpec:
 class ToolRegistry:
     """集中保存工具元数据，并提供统一查找和执行入口。"""
 
-    def __init__(self) -> None:
+    def __init__(self, authorizer: ToolAuthorizer | None = None) -> None:
         self._tools: dict[str, ToolSpec] = {}
+        self.authorizer = authorizer or ConsoleAuthorizer()
 
     def register(self, spec: ToolSpec) -> None:
         """注册一个工具；拒绝空名称和重复名称。"""
@@ -88,6 +90,19 @@ class ToolRegistry:
             )
         except ToolArgumentValidationError as exc:
             return ToolResult.failure(f"工具参数校验失败：{exc}")
+
+        if spec.risk_level is RiskLevel.HIGH:
+            try:
+                decision = self.authorizer.authorize(
+                    spec.name, validated_arguments
+                )
+            except Exception as exc:  # noqa: BLE001 - 授权边界必须失败关闭
+                return ToolResult.failure(f"工具授权检查失败：{exc}")
+
+            if not decision.approved:
+                return ToolResult.cancelled(
+                    f"已取消执行高风险工具 {spec.name}：{decision.reason}"
+                )
 
         try:
             output = spec.executor(**validated_arguments)
