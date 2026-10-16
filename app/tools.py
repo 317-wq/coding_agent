@@ -5,8 +5,13 @@ from pathlib import Path
 from typing import Any
 
 
+from app.workspace import WorkspaceContext
+
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-WORKSPACE = (PROJECT_ROOT / "workspace" / "demo").resolve()
+DEFAULT_WORKSPACE = (PROJECT_ROOT / "workspace" / "demo").resolve()
+WORKSPACE = DEFAULT_WORKSPACE
+WORKSPACE_CONTEXT = WorkspaceContext(root=WORKSPACE)
 
 MAX_FILE_SIZE = 1024 * 1024
 TEST_TIMEOUT = 30
@@ -146,22 +151,17 @@ TOOL_DEFINITIONS = [
 ]
 
 
+def set_workspace(context: WorkspaceContext) -> None:
+    """设置当前工具系统共享的工作区上下文。"""
+    global WORKSPACE, WORKSPACE_CONTEXT
+    WORKSPACE_CONTEXT = context
+    WORKSPACE = context.root
+
+
 def _resolve_path(path: str) -> Path:
     """解析路径，并拒绝访问工作目录之外的位置。"""
 
-    candidate = Path(path)
-
-    if candidate.is_absolute():
-        raise ValueError("不允许使用绝对路径。")
-
-    target = (WORKSPACE / candidate).resolve()
-
-    try:
-        target.relative_to(WORKSPACE)
-    except ValueError:
-        raise ValueError("禁止访问工作目录之外的路径。") from None
-
-    return target
+    return WORKSPACE_CONTEXT.resolve(path)
 
 
 def list_files(path: str = ".", recursive: bool = True) -> str:
