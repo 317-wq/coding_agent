@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import tools
+from app import git_tools, tools
 from app.agent import Agent
 from app.registry import (
     DEFAULT_TOOL_REGISTRY,
@@ -87,13 +87,16 @@ def test_registry_normalizes_legacy_tool_output(output, status):
 
 def test_default_registry_contains_every_builtin_tool():
     definition_names = tuple(
-        definition["function"]["name"] for definition in tools.TOOL_DEFINITIONS
+        definition["function"]["name"]
+        for definition in (*tools.TOOL_DEFINITIONS, *git_tools.TOOL_DEFINITIONS)
     )
 
     assert DEFAULT_TOOL_REGISTRY.names() == definition_names
     assert DEFAULT_TOOL_REGISTRY.get("delete_file").risk_level is RiskLevel.HIGH
     assert DEFAULT_TOOL_REGISTRY.get("run_tests").risk_level is RiskLevel.MEDIUM
     assert DEFAULT_TOOL_REGISTRY.get("read_file").risk_level is RiskLevel.LOW
+    assert DEFAULT_TOOL_REGISTRY.get("git_status").risk_level is RiskLevel.LOW
+    assert DEFAULT_TOOL_REGISTRY.get("git_diff").risk_level is RiskLevel.LOW
 
 
 def test_model_definition_is_a_copy():
