@@ -76,11 +76,19 @@ class Agent:
         )
         project_snapshot = ProjectExplorer(self.workspace).explore()
         decision = judge_task_complexity(task, project_snapshot)
+        trace.record(
+            "complexity_decided",
+            complexity=decision.complexity.value,
+            requires_planning=decision.requires_planning,
+            reasons=decision.reasons,
+        )
         self.last_plan = (
             create_task_plan(task, project_snapshot, decision)
             if decision.requires_planning
             else None
         )
+        if self.last_plan is not None:
+            trace.record("plan_created", plan=self.last_plan.to_dict())
         state_manager = (
             PlanStateManager(self.last_plan) if self.last_plan is not None else None
         )
@@ -178,6 +186,15 @@ class Agent:
                         self.last_context.context.tool_results,
                         self.last_context.context.test_results,
                     )
+                    trace.record(
+                        "completion_checked",
+                        status=decision.status.value,
+                        completed=decision.completed,
+                        reason=decision.reason,
+                        pending_step_ids=decision.pending_step_ids,
+                        failed_step_ids=decision.failed_step_ids,
+                        evidence=decision.evidence,
+                    )
                     if decision.status is not CompletionStatus.COMPLETE:
                         messages.append(
                             {"role": "assistant", "content": answer}
@@ -246,7 +263,18 @@ class Agent:
                         f"工具参数解析失败：{exc}"
                     )
                     if self.last_context is not None:
+                        before_trim = self.last_context.context.truncated_count
                         self.last_context.add_tool_result(tool_result)
+                        if (
+                            self.last_context.context.truncated_count
+                            > before_trim
+                        ):
+                            trace.record(
+                                "context_trimmed",
+                                truncated_count=(
+                                    self.last_context.context.truncated_count
+                                ),
+                            )
                     trace.record(
                         "tool_arguments_invalid",
                         tool=tool_name,
@@ -298,7 +326,13 @@ class Agent:
                 tool_call_count += 1
 
                 if self.last_context is not None:
+                    before_trim = self.last_context.context.truncated_count
                     self.last_context.add_tool_result(tool_result)
+                    if self.last_context.context.truncated_count > before_trim:
+                        trace.record(
+                            "context_trimmed",
+                            truncated_count=self.last_context.context.truncated_count,
+                        )
                 if state_manager is not None:
                     current = state_manager.state().current_step_id
                     if current is None:
@@ -325,6 +359,16 @@ class Agent:
                                 current, tool_result.error or "工具执行失败"
                             )
                         self.last_plan = state_manager.state().plan
+                        updated_step = next(
+                            step
+                            for step in self.last_plan.steps
+                            if step.step_id == current
+                        )
+                        trace.record(
+                            "plan_step_status_changed",
+                            step_id=current,
+                            status=updated_step.status.value,
+                        )
                         self.last_context.update_plan(
                             self.last_plan,
                             state_manager.state().current_step_id,
