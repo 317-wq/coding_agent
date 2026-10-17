@@ -9,8 +9,11 @@ from app.context import ContextManager
 from app.explorer import ProjectExplorer
 from app.model import ModelAdapter
 from app.planner import TaskPlan, create_task_plan
+from app.recovery import RecoveryAction, RecoveryDecision
 from app.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from app.result import ToolResult, ToolStatus
+from app.rollback import AuthorizedRollback, RollbackStatus
+from app.task_safety import TaskSafetySession
 from app.task_state import PlanStateManager
 from app.tools import set_workspace
 from app.trace import ExecutionTrace
@@ -57,6 +60,8 @@ class Agent:
         self.last_trace: ExecutionTrace | None = None
         self.last_plan: TaskPlan | None = None
         self.last_context: ContextManager | None = None
+        self.last_change_set = None
+        self.last_recovery_decision: RecoveryDecision | None = None
 
     @staticmethod
     def _print_trace_summary(trace: ExecutionTrace) -> None:
@@ -95,6 +100,8 @@ class Agent:
         self.last_context = ContextManager(
             task, project_snapshot, self.last_plan
         )
+        safety = TaskSafetySession(self.workspace)
+        self.last_change_set = safety.change_set
 
         messages: list[ChatCompletionMessageParam] = [
             {
@@ -196,6 +203,49 @@ class Agent:
                         evidence=decision.evidence,
                     )
                     if decision.status is not CompletionStatus.COMPLETE:
+                        recovery = safety.observe_completion(decision.status)
+                        self.last_recovery_decision = recovery
+                        if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
+                            rollback = AuthorizedRollback(
+                                safety.change_set, self.registry.authorizer
+                            ).execute()
+                            if rollback.status is not RollbackStatus.RESTORED:
+                                reason = f"恢复未完成：{rollback.reason}"
+                                trace.record("task_stopped", reason=reason)
+                                self._print_trace_summary(trace)
+                                return reason
+                            safety.reset_after_recovery()
+                            self.last_change_set = safety.change_set
+                            project_snapshot = ProjectExplorer(
+                                self.workspace
+                            ).explore()
+                            new_complexity = judge_task_complexity(
+                                task, project_snapshot
+                            )
+                            self.last_plan = create_task_plan(
+                                task, project_snapshot, new_complexity
+                            )
+                            state_manager = PlanStateManager(self.last_plan)
+                            self.last_context = ContextManager(
+                                task, project_snapshot, self.last_plan
+                            )
+                            messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "本次任务变更已授权回滚。项目快照和计划已刷新，"
+                                        "请从新计划重新执行：\n"
+                                        f"{self.last_plan.to_json()}"
+                                    ),
+                                }
+                            )
+                            continue
+                        if recovery.action is RecoveryAction.STOP:
+                            trace.record(
+                                "task_stopped", reason=recovery.reason
+                            )
+                            self._print_trace_summary(trace)
+                            return recovery.reason
                         messages.append(
                             {"role": "assistant", "content": answer}
                         )
@@ -309,6 +359,7 @@ class Agent:
                 )
 
                 try:
+                    safety.prepare_tool(tool_name, arguments)
                     tool_result = self.registry.execute(tool_name, arguments)
                 except KeyboardInterrupt:
                     trace.record(
@@ -374,6 +425,23 @@ class Agent:
                             state_manager.state().current_step_id,
                         )
 
+                plan_failed = bool(
+                    state_manager is not None
+                    and state_manager.state().failed_step_ids
+                )
+                try:
+                    recovery = safety.observe(
+                        tool_name,
+                        tool_result,
+                        plan_failed=plan_failed,
+                    )
+                except Exception as exc:  # noqa: BLE001 - safety boundary
+                    recovery = RecoveryDecision(
+                        RecoveryAction.STOP,
+                        f"无法生成安全恢复决策：{exc}",
+                    )
+                self.last_recovery_decision = recovery
+
                 trace.record(
                     "tool_call_finished",
                     tool=tool_name,
@@ -393,6 +461,65 @@ class Agent:
                         "content": result_json,
                     }
                 )
+
+                if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
+                    rollback = AuthorizedRollback(
+                        safety.change_set, self.registry.authorizer
+                    ).execute()
+                    if rollback.status is not RollbackStatus.RESTORED:
+                        reason = f"恢复未完成：{rollback.reason}"
+                        trace.record("task_stopped", reason=reason)
+                        self._print_trace_summary(trace)
+                        return reason
+
+                    safety.reset_after_recovery()
+                    self.last_change_set = safety.change_set
+                    project_snapshot = ProjectExplorer(self.workspace).explore()
+                    decision = judge_task_complexity(task, project_snapshot)
+                    self.last_plan = create_task_plan(
+                        task, project_snapshot, decision
+                    )
+                    state_manager = PlanStateManager(self.last_plan)
+                    self.last_context = ContextManager(
+                        task, project_snapshot, self.last_plan
+                    )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "本次任务变更已授权回滚。项目快照和计划已刷新，"
+                                "请从新计划重新执行：\n"
+                                f"{self.last_plan.to_json()}"
+                            ),
+                        }
+                    )
+                    break
+
+                if recovery.action is RecoveryAction.REPLAN:
+                    project_snapshot = ProjectExplorer(self.workspace).explore()
+                    decision = judge_task_complexity(task, project_snapshot)
+                    self.last_plan = create_task_plan(
+                        task, project_snapshot, decision
+                    )
+                    state_manager = PlanStateManager(self.last_plan)
+                    self.last_context = ContextManager(
+                        task, project_snapshot, self.last_plan
+                    )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "当前执行失败，已刷新项目状态并重新规划：\n"
+                                f"{self.last_plan.to_json()}"
+                            ),
+                        }
+                    )
+                    break
+
+                if recovery.action is RecoveryAction.STOP:
+                    trace.record("task_stopped", reason=recovery.reason)
+                    self._print_trace_summary(trace)
+                    return recovery.reason
 
                 # 工具返回错误时，停止本批次剩余调用，交由模型重新判断。
                 if tool_result.status is ToolStatus.FAILURE:
