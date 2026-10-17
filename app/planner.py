@@ -9,9 +9,13 @@ from app.explorer import ProjectSnapshot
 
 
 class PlanStepStatus(StrEnum):
-    """计划步骤的初始状态；状态流转由后续模块负责。"""
+    """计划步骤的生命周期状态。"""
 
     PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True)
