@@ -3,10 +3,15 @@ import json
 
 from openai.types.chat import ChatCompletionMessageParam
 
+from app.completion import CompletionStatus, verify_completion
+from app.complexity import judge_task_complexity
+from app.context import ContextManager
 from app.explorer import ProjectExplorer
 from app.model import ModelAdapter
+from app.planner import TaskPlan, create_task_plan
 from app.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from app.result import ToolResult, ToolStatus
+from app.task_state import PlanStateManager
 from app.tools import set_workspace
 from app.trace import ExecutionTrace
 from app.workspace import WorkspaceContext
@@ -50,6 +55,8 @@ class Agent:
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
         self.last_trace: ExecutionTrace | None = None
+        self.last_plan: TaskPlan | None = None
+        self.last_context: ContextManager | None = None
 
     @staticmethod
     def _print_trace_summary(trace: ExecutionTrace) -> None:
@@ -68,6 +75,18 @@ class Agent:
             workspace=str(self.workspace.root),
         )
         project_snapshot = ProjectExplorer(self.workspace).explore()
+        decision = judge_task_complexity(task, project_snapshot)
+        self.last_plan = (
+            create_task_plan(task, project_snapshot, decision)
+            if decision.requires_planning
+            else None
+        )
+        state_manager = (
+            PlanStateManager(self.last_plan) if self.last_plan is not None else None
+        )
+        self.last_context = ContextManager(
+            task, project_snapshot, self.last_plan
+        )
 
         messages: list[ChatCompletionMessageParam] = [
             {
@@ -87,6 +106,18 @@ class Agent:
                 "content": task,
             },
         ]
+        if self.last_plan is not None:
+            messages.insert(
+                2,
+                {
+                    "role": "system",
+                    "content": (
+                        "这是本次任务的结构化计划，请按步骤推进；"
+                        "只有工具结果和测试结果证明完成后才能结束：\n"
+                        f"{self.last_plan.to_json()}"
+                    ),
+                },
+            )
 
         tool_call_count = 0
 
@@ -107,7 +138,7 @@ class Agent:
                 )
                 self._print_trace_summary(trace)
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - model boundary
                 trace.record(
                     "model_request_failed",
                     step=step,
@@ -141,6 +172,26 @@ class Agent:
             # 没有工具调用，说明模型准备直接回复用户。
             if not message.tool_calls:
                 answer = message.content or "任务结束，但模型没有提供文字总结。"
+                if self.last_plan is not None and self.last_context is not None:
+                    decision = verify_completion(
+                        self.last_context.context.plan or self.last_plan,
+                        self.last_context.context.tool_results,
+                        self.last_context.context.test_results,
+                    )
+                    if decision.status is not CompletionStatus.COMPLETE:
+                        messages.append(
+                            {"role": "assistant", "content": answer}
+                        )
+                        messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "完成判定未通过，请继续执行："
+                                    f"{decision.reason}"
+                                ),
+                            }
+                        )
+                        continue
                 trace.record("task_completed", answer=answer)
                 print("\n[Agent] 任务结束")
                 self._print_trace_summary(trace)
@@ -186,12 +237,16 @@ class Agent:
                     arguments = json.loads(tool_call.function.arguments)
 
                     if not isinstance(arguments, dict):
-                        raise ValueError("工具参数必须是 JSON 对象。")
+                        raise ValueError(  # noqa: TRY004 - normalized below
+                            "工具参数必须是 JSON 对象。"
+                        )
 
                 except (json.JSONDecodeError, ValueError) as exc:
                     tool_result = ToolResult.failure(
                         f"工具参数解析失败：{exc}"
                     )
+                    if self.last_context is not None:
+                        self.last_context.add_tool_result(tool_result)
                     trace.record(
                         "tool_arguments_invalid",
                         tool=tool_name,
@@ -235,12 +290,45 @@ class Agent:
                     )
                     self._print_trace_summary(trace)
                     raise
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - tool boundary
                     tool_result = ToolResult.failure(
                         f"工具执行异常：{exc}"
                     )
 
                 tool_call_count += 1
+
+                if self.last_context is not None:
+                    self.last_context.add_tool_result(tool_result)
+                if state_manager is not None:
+                    current = state_manager.state().current_step_id
+                    if current is None:
+                        pending = next(
+                            (
+                                step.step_id
+                                for step in state_manager.state().plan.steps
+                                if step.status.value == "pending"
+                            ),
+                            None,
+                        )
+                        if pending is not None:
+                            state_manager.start_step(pending)
+                            current = pending
+                    if current is not None:
+                        if tool_result.status is ToolStatus.SUCCESS:
+                            state_manager.complete_step(current, tool_result.result)
+                        elif tool_result.status is ToolStatus.CANCELLED:
+                            state_manager.cancel_step(
+                                current, tool_result.result or "工具已取消"
+                            )
+                        else:
+                            state_manager.fail_step(
+                                current, tool_result.error or "工具执行失败"
+                            )
+                        self.last_plan = state_manager.state().plan
+                        self.last_context.update_plan(
+                            self.last_plan,
+                            state_manager.state().current_step_id,
+                        )
 
                 trace.record(
                     "tool_call_finished",
