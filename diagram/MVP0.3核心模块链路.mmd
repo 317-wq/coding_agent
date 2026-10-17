@@ -1,0 +1,47 @@
+%% MVP 0.3 核心模块链路：任务、计划、上下文、工具结果和 Trace
+flowchart LR
+    User([用户任务]) --> CLI[CLI / main.py]
+    CLI --> Agent[Agent 核心循环]
+
+    Agent --> Explorer[项目探索器]
+    Explorer -->|ProjectSnapshot| Complexity{复杂度判断}
+    Complexity -->|简单任务| Loop[模型-工具执行循环]
+    Complexity -->|复杂任务| Planner[Planner<br/>结构化任务计划]
+    Planner -->|TaskPlan| State[计划执行状态]
+    State -->|当前步骤 / 步骤状态| Loop
+
+    Agent --> Context[上下文管理]
+    Explorer -->|项目快照| Context
+    Planner -->|任务计划| Context
+    Context -->|任务 + 最近结果| Loop
+
+    Loop -->|消息 / 工具定义| Model[Model Adapter]
+    Model -->|模型响应 / 工具调用| Loop
+    Loop --> Registry[Tool Registry]
+    Registry -->|ToolResult| Loop
+    Loop -->|工具结果 / 测试结果| Context
+    Loop -->|成功 / 失败 / 取消| State
+
+    State --> Verify[结果验证与完成判定]
+    Context --> Verify
+    Verify -->|未完成：继续执行| Loop
+    Verify -->|完成或阻塞| Output[输出任务总结 / 原因]
+    Output --> CLI
+
+    Agent -.复杂度、计划、状态、上下文、判定事件.-> Trace[ExecutionTrace]
+    Loop -.工具调用事件.-> Trace
+    Trace -->|结构化追踪| Output
+
+    classDef entry fill:#E8F1FB,stroke:#3B82F6,color:#172554;
+    classDef core fill:#E8F7EF,stroke:#22C55E,color:#14532D;
+    classDef data fill:#FFF4E5,stroke:#F59E0B,color:#78350F;
+    classDef tool fill:#F3E8FF,stroke:#A855F7,color:#581C87;
+    classDef trace fill:#FCE7F3,stroke:#EC4899,color:#831843;
+    classDef decision fill:#FEF3C7,stroke:#D97706,color:#78350F;
+
+    class User,CLI,Output entry;
+    class Agent,Loop,Explorer,Planner,State,Context,Verify core;
+    class Model data;
+    class Registry tool;
+    class Trace trace;
+    class Complexity decision;
