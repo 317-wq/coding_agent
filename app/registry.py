@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from app import tools
+from app import git_tools, tools
 from app.authorization import ConsoleAuthorizer, ToolAuthorizer
 from app.result import ToolResult
 from app.validation import ToolArgumentValidationError, validate_tool_arguments
@@ -145,19 +145,24 @@ def build_default_registry() -> ToolRegistry:
 
     registry = ToolRegistry()
 
-    for definition in tools.TOOL_DEFINITIONS:
-        function = definition["function"]
-        name = function["name"]
-        executor = getattr(tools, name)
-        registry.register(
-            ToolSpec(
-                name=name,
-                description=function["description"],
-                parameters=function["parameters"],
-                executor=executor,
-                risk_level=TOOL_RISK_LEVELS.get(name, RiskLevel.LOW),
+    tool_modules = (
+        (tools, tools.TOOL_DEFINITIONS),
+        (git_tools, git_tools.TOOL_DEFINITIONS),
+    )
+    for module, definitions in tool_modules:
+        for definition in definitions:
+            function = definition["function"]
+            name = function["name"]
+            executor = getattr(module, name)
+            registry.register(
+                ToolSpec(
+                    name=name,
+                    description=function["description"],
+                    parameters=function["parameters"],
+                    executor=executor,
+                    risk_level=TOOL_RISK_LEVELS.get(name, RiskLevel.LOW),
+                )
             )
-        )
 
     return registry
 
