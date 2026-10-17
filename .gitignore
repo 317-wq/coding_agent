@@ -1,6 +1,7 @@
 .env
-mvp0.0.md
+MVP/
 diagram/
 __pycache__/
 .venv/
 workspace/
+tests/
