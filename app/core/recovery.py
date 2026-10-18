@@ -25,12 +25,16 @@ class RecoverySignals:
     completion_status: CompletionStatus | None = None
     recoverable_paths: tuple[str, ...] = ()
     recovery_attempts: int = 0
+    test_repair_attempts: int = 0
+    test_error_kind: str | None = None
 
     def __post_init__(self) -> None:
         if self.consecutive_tool_failures < 0:
             raise ValueError("连续工具失败次数不能小于 0。")
         if self.recovery_attempts < 0:
             raise ValueError("恢复尝试次数不能小于 0。")
+        if self.test_repair_attempts < 0:
+            raise ValueError("测试自动修复次数不能小于 0。")
         if any(not path.strip() for path in self.recoverable_paths):
             raise ValueError("可恢复路径不能为空。")
 
@@ -90,6 +94,22 @@ class RecoveryPolicy:
                 paths,
             )
 
+        if signals.test_error_kind in {"collection", "environment"}:
+            return RecoveryDecision(
+                RecoveryAction.STOP,
+                "测试执行环境或收集阶段出错，未自动回滚代码；请先处理测试环境问题。",
+                triggers,
+                paths,
+            )
+
+        if signals.test_failed and signals.test_repair_attempts >= 2:
+            return RecoveryDecision(
+                RecoveryAction.STOP,
+                "代码修改后的测试自动修复次数已达到上限 2 次，请人工处理。",
+                triggers,
+                paths,
+            )
+
         hard_failure = (
             signals.test_failed
             or signals.plan_failed
@@ -133,6 +153,8 @@ class RecoveryPolicy:
             )
         if signals.test_failed:
             triggers.append("测试失败")
+        if signals.test_error_kind:
+            triggers.append(f"测试{signals.test_error_kind}错误")
         if signals.plan_failed:
             triggers.append("计划失败")
         if signals.completion_status is CompletionStatus.BLOCKED:
