@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
 
-from app.authorization import AuthorizationDecision
-from app.change_set import TaskChangeSet
-from app.rollback import AuthorizedRollback, RollbackStatus
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
+from app.tools.authorization import AuthorizationDecision
+from app.tools.change_set import TaskChangeSet
+from app.tools.rollback import AuthorizedRollback, RollbackStatus
 
 
 class StubAuthorizer:
