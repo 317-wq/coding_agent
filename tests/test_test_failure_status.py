@@ -50,3 +50,16 @@ def test_run_tests_marks_pytest_collection_conflict(tmp_path: Path):
     result = tools.run_tests(".")
     assert "测试错误类型：收集冲突" in result
     assert "测试结果：失败" in result
+
+
+def test_name_error_in_test_code_is_classified_for_repair(tmp_path: Path):
+    test_file = tmp_path / "test_calculator.py"
+    test_file.write_text(
+        "def test_approx():\n    assert 1 == pytest.approx(1)\n",
+        encoding="utf-8",
+    )
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+
+    result = tools.run_tests("test_calculator.py")
+
+    assert "测试错误类型：测试代码" in result
