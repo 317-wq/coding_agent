@@ -286,6 +286,14 @@ class Agent:
                         )
                         continue
                     if decision.status is not CompletionStatus.COMPLETE:
+                        if safety.validation_only:
+                            trace.record(
+                                "task_stopped",
+                                reason="validation_incomplete",
+                                error=decision.reason,
+                            )
+                            self._print_trace_summary(trace)
+                            return decision.reason
                         recovery = safety.observe_completion(decision.status)
                         self.last_recovery_decision = recovery
                         trace.record(
@@ -534,6 +542,19 @@ class Agent:
                 if tool_result.status is ToolStatus.FAILURE and self._is_boundary_failure(tool_result):
                     reason = tool_result.error or "工具访问违反工作区安全边界。"
                     trace.record("task_stopped", reason="workspace_boundary_violation", error=reason)
+                    self._print_trace_summary(trace)
+                    return reason
+
+                if (
+                    tool_result.status is ToolStatus.FAILURE
+                    and safety.validation_only
+                ):
+                    reason = tool_result.error or "验收工具执行失败，已停止继续探索。"
+                    trace.record(
+                        "task_stopped",
+                        reason="validation_failure",
+                        error=reason,
+                    )
                     self._print_trace_summary(trace)
                     return reason
 
