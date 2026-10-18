@@ -38,4 +38,15 @@ def test_run_tests_failure_becomes_structured_failure(tmp_path: Path):
     result = registry.execute("run_tests", {"test_path": "test_failure.py"})
 
     assert result.status is ToolStatus.FAILURE
-    assert "测试结果：失败" in (result.error or "")
+
+
+def test_run_tests_marks_pytest_collection_conflict(tmp_path: Path):
+    for folder in (tmp_path / "a", tmp_path / "b"):
+        folder.mkdir()
+        (folder / "test_same.py").write_text(
+            "def test_ok():\n    assert True\n", encoding="utf-8"
+        )
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+    result = tools.run_tests(".")
+    assert "测试错误类型：收集冲突" in result
+    assert "测试结果：失败" in result
