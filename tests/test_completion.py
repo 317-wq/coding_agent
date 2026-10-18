@@ -70,3 +70,15 @@ def test_only_successful_test_text_counts_as_test_evidence():
     decision = verify_completion(plan, test_results=["检查完成，但未运行测试"])
 
     assert decision.status is CompletionStatus.INCOMPLETE
+
+
+def test_target_test_evidence_can_complete_stale_pending_plan():
+    plan = create_task_plan("修改代码")
+    decision = verify_completion(
+        plan,
+        [ToolResult.success("修改文件成功并已核验")],
+        ["测试目标：tests/test_calculator.py\n测试结果：通过"],
+    )
+
+    assert decision.status is CompletionStatus.COMPLETE
+    assert decision.pending_step_ids == (1,)
