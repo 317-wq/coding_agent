@@ -2,8 +2,8 @@ import json
 import subprocess
 from pathlib import Path
 
-from app.git_repository import GitRepositoryStatus, inspect_git_repository
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
+from app.tools.git_repository import GitRepositoryStatus, inspect_git_repository
 
 
 def _git_init(path: Path) -> None:
@@ -49,7 +49,7 @@ def test_non_git_workspace_degrades_explicitly(tmp_path: Path):
 
 
 def test_missing_git_executable_degrades_explicitly(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr("app.git_repository.shutil.which", lambda name: None)
+    monkeypatch.setattr("app.tools.git_repository.shutil.which", lambda name: None)
 
     info = inspect_git_repository(WorkspaceContext.from_path(tmp_path))
 
