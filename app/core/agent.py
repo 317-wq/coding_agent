@@ -494,14 +494,7 @@ class Agent:
                 if state_manager is not None:
                     current = state_manager.state().current_step_id
                     if current is None:
-                        pending = next(
-                            (
-                                step.step_id
-                                for step in state_manager.state().plan.steps
-                                if step.status.value == "pending"
-                            ),
-                            None,
-                        )
+                        pending = state_manager.match_step(tool_name, arguments)
                         if pending is not None:
                             state_manager.start_step(pending)
                             current = pending
