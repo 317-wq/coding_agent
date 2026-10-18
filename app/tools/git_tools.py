@@ -4,8 +4,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from app.git_repository import GIT_TIMEOUT, inspect_git_repository
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
+from app.tools.git_repository import GIT_TIMEOUT, inspect_git_repository
 
 MAX_GIT_OUTPUT = 12_000
 
