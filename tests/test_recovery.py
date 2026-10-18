@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from app.completion import CompletionStatus
-from app.recovery import (
+from app.core.completion import CompletionStatus
+from app.core.recovery import (
     RecoveryAction,
     RecoveryPolicy,
     RecoverySignals,
