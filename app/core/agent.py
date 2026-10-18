@@ -10,6 +10,8 @@ from app.core.context import ContextManager
 from app.core.planner import TaskPlan, create_task_plan
 from app.core.recovery import RecoveryAction, RecoveryDecision
 from app.core.requirements import TaskRequirementVerifier
+from app.core.result_aggregator import TaskResultAggregator
+from app.core.task_result import TaskResult, TaskStatus
 from app.core.task_safety import TaskSafetySession
 from app.core.task_state import PlanStateManager
 from app.runtime.explorer import ProjectExplorer
@@ -68,6 +70,8 @@ class Agent:
         self.last_context: ContextManager | None = None
         self.last_change_set = None
         self.last_recovery_decision: RecoveryDecision | None = None
+        self.last_result: TaskResult | None = None
+        self.last_safety: TaskSafetySession | None = None
 
     @staticmethod
     def _print_trace_summary(trace: ExecutionTrace) -> None:
@@ -76,7 +80,48 @@ class Agent:
         print(trace.summary())
 
     def run(self, task: str) -> str:
-        """执行一个用户任务，返回最终结果。"""
+        """执行任务并生成结构化结果，同时兼容返回原始文本结果。"""
+        self.last_result = None
+        self.last_safety = None
+        try:
+            answer = self._run_legacy(task)
+        finally:
+            self._build_task_result(task)
+        return answer
+
+    def _build_task_result(self, task: str) -> None:
+        """从本次 Agent 运行证据生成并保存 TaskResult。"""
+        if self.last_trace is None or self.last_context is None or self.last_change_set is None:
+            return
+        try:
+            changes = self.last_change_set.summary()
+        except Exception as exc:  # noqa: BLE001 - reporting boundary
+            self.last_trace.record("task_result_aggregation_failed", error=str(exc))
+            return
+        completion_status = None
+        for event in reversed(self.last_trace.events):
+            if event["event"] == "completion_checked":
+                completion_status = event.get("details", {}).get("status")
+                break
+        task_status = None
+        if completion_status == "blocked":
+            task_status = TaskStatus.BLOCKED
+        repair_attempts = (
+            self.last_safety.test_repair_attempts
+            if self.last_safety is not None
+            else 0
+        )
+        self.last_result = TaskResultAggregator().aggregate(
+            self.last_context.context,
+            changes,
+            trace=self.last_trace,
+            recovery=self.last_recovery_decision,
+            repair_attempts=repair_attempts,
+            task_status=task_status,
+        )
+
+    def _run_legacy(self, task: str) -> str:
+        """执行原有 Agent 工具循环并返回兼容的文本结果。"""
 
         trace = ExecutionTrace()
         self.last_trace = trace
@@ -109,6 +154,7 @@ class Agent:
             task, project_snapshot, self.last_plan
         )
         safety = TaskSafetySession(self.workspace)
+        self.last_safety = safety
         self.last_change_set = safety.change_set
 
         messages: list[ChatCompletionMessageParam] = [
