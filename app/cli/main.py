@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from app import tools
+from app.cli.report import render_task_report
 from app.core.agent import Agent
 from app.runtime.workspace import WorkspaceContext
 
@@ -33,6 +34,12 @@ def _read_task() -> str | None:
 
 
 def _parse_args() -> WorkspaceContext:
+    """解析命令行参数并返回受控工作区，兼容旧调用方。"""
+    return _parse_options()[0]
+
+
+def _parse_options() -> tuple[WorkspaceContext, str]:
+    """解析工作区和任务报告输出格式。"""
     parser = argparse.ArgumentParser(description="Mini Coding Agent")
     parser.add_argument(
         "--workspace",
@@ -40,9 +47,15 @@ def _parse_args() -> WorkspaceContext:
         default=tools.WORKSPACE,
         help="Agent 工作区路径，默认为 workspace/demo",
     )
+    parser.add_argument(
+        "--output-format",
+        choices=("text", "json"),
+        default="text",
+        help="任务结果报告格式，默认为 text",
+    )
     args = parser.parse_args()
     try:
-        return WorkspaceContext.from_path(args.workspace)
+        return WorkspaceContext.from_path(args.workspace), args.output_format
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -50,7 +63,7 @@ def _parse_args() -> WorkspaceContext:
 def main() -> None:
     """程序入口。"""
 
-    workspace = _parse_args()
+    workspace, output_format = _parse_options()
 
     print("=" * 50)
     print("Mini Coding Agent")
@@ -83,7 +96,10 @@ def main() -> None:
             print("\n" + "=" * 50)
             print("任务执行结果")
             print("=" * 50)
-            print(result)
+            if agent.last_result is not None:
+                print(render_task_report(agent.last_result, output_format))
+            else:
+                print(result)
         except KeyboardInterrupt:
             print("\n用户中断了当前任务。")
         except Exception as exc:  # noqa: BLE001 - CLI task boundary
