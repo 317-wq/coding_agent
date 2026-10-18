@@ -1,3 +1,5 @@
+"""校验工具参数并报告结构化参数错误。"""
+
 from collections.abc import Mapping
 from typing import Any
 
