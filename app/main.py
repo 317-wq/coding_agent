@@ -6,6 +6,30 @@ from app.agent import Agent
 from app.workspace import WorkspaceContext
 
 
+def _read_task() -> str | None:
+    """读取一条支持多行的任务；单独输入 exit/quit 仍退出程序。"""
+
+    try:
+        first = input("\n请输入编程任务（输入 END 结束多行任务）：")
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+    if first.strip().lower() in {"exit", "quit"}:
+        return "__EXIT__"
+    if first.strip() == "END":
+        return ""
+
+    lines = [first]
+    while True:
+        try:
+            line = input("...")
+        except (EOFError, KeyboardInterrupt):
+            return "\n".join(lines).strip()
+        if line.strip() == "END":
+            return "\n".join(lines).strip()
+        lines.append(line)
+
+
 def _parse_args() -> WorkspaceContext:
     parser = argparse.ArgumentParser(description="Mini Coding Agent")
     parser.add_argument(
@@ -36,17 +60,19 @@ def main() -> None:
 
     while True:
         try:
-            task = input("\n请输入编程任务：").strip()
+            task = _read_task()
         except (EOFError, KeyboardInterrupt):
             print("\n程序已退出。")
             break
 
-        if not task:
-            continue
-
-        if task.lower() in {"exit", "quit"}:
+        if task is None:
+            print("\n程序已退出。")
+            break
+        if task == "__EXIT__":
             print("程序已退出。")
             break
+        if not task.strip():
+            continue
 
         print("\n开始执行任务，请稍候……")
 
@@ -58,7 +84,7 @@ def main() -> None:
             print(result)
         except KeyboardInterrupt:
             print("\n用户中断了当前任务。")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - CLI task boundary
             print(f"\n程序发生异常：{exc}")
 
 
