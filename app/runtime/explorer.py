@@ -1,10 +1,12 @@
+"""扫描工作区并生成项目结构与技术栈快照。"""
+
 import json
 import tomllib
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
 
 IGNORED_DIRECTORIES = {
     ".git",
