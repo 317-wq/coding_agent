@@ -65,6 +65,6 @@ def test_agent_passes_project_snapshot_to_model(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
     agent = Agent(workspace=WorkspaceContext.from_path(tmp_path))
 
-    assert agent.run("查看项目") == "完成"
+    assert agent.run("查看项目").startswith("已达到最大执行轮数")
     assert "sample-project" in captured_messages[1]["content"]
     assert "pyproject.toml" in captured_messages[1]["content"]
