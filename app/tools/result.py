@@ -1,3 +1,5 @@
+"""工具调用结果和状态的统一数据模型。"""
+
 import json
 from dataclasses import dataclass
 from enum import StrEnum
