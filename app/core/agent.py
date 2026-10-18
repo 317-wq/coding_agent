@@ -1,25 +1,26 @@
+"""Agent 主循环：协调规划、工具调用、安全监控与任务完成判定。"""
 
 import json
 
 from openai.types.chat import ChatCompletionMessageParam
 
-from app.completion import CompletionStatus, CompletionVerifier, verify_completion
-from app.complexity import judge_task_complexity
-from app.context import ContextManager
-from app.explorer import ProjectExplorer
-from app.git_repository import inspect_git_repository
-from app.model import ModelAdapter
-from app.planner import TaskPlan, create_task_plan
-from app.recovery import RecoveryAction, RecoveryDecision
-from app.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
-from app.requirements import TaskRequirementVerifier
-from app.result import ToolResult, ToolStatus
-from app.rollback import AuthorizedRollback, RollbackStatus
-from app.task_safety import TaskSafetySession
-from app.task_state import PlanStateManager
+from app.core.completion import CompletionStatus, CompletionVerifier, verify_completion
+from app.core.complexity import judge_task_complexity
+from app.core.context import ContextManager
+from app.core.planner import TaskPlan, create_task_plan
+from app.core.recovery import RecoveryAction, RecoveryDecision
+from app.core.requirements import TaskRequirementVerifier
+from app.core.task_safety import TaskSafetySession
+from app.core.task_state import PlanStateManager
+from app.runtime.explorer import ProjectExplorer
+from app.runtime.model import ModelAdapter
+from app.runtime.trace import ExecutionTrace
+from app.runtime.workspace import WorkspaceContext
 from app.tools import set_workspace
-from app.trace import ExecutionTrace
-from app.workspace import WorkspaceContext
+from app.tools.git_repository import inspect_git_repository
+from app.tools.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
+from app.tools.result import ToolResult, ToolStatus
+from app.tools.rollback import AuthorizedRollback, RollbackStatus
 
 SYSTEM_PROMPT = """
 你是一个能够实际编写和修改 Python 代码的 Coding Agent。
