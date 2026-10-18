@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import pytest
 
 from app import tools
-from app.agent import Agent
-from app.explorer import ProjectExplorer
-from app.workspace import WorkspaceContext
+from app.core.agent import Agent
+from app.runtime.explorer import ProjectExplorer
+from app.runtime.workspace import WorkspaceContext
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +62,7 @@ def test_agent_passes_project_snapshot_to_model(monkeypatch, tmp_path: Path):
             message = SimpleNamespace(tool_calls=None, content="完成")
             return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(workspace=WorkspaceContext.from_path(tmp_path))
 
     assert agent.run("查看项目").startswith("已达到最大执行轮数")
