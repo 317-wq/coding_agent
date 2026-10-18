@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from app.complexity import TaskComplexity, judge_task_complexity
-from app.planner import (
+from app.core.complexity import TaskComplexity, judge_task_complexity
+from app.core.planner import (
     PlanStepStatus,
     TaskPlan,
     TaskPlanner,
@@ -25,11 +25,11 @@ def test_complex_task_generates_ordered_pending_steps():
 
 
 def test_simple_task_has_single_stable_objective():
-    plan = create_task_plan("读取 app/config.py")
+    plan = create_task_plan("读取 app.runtime.config.py")
 
     assert plan.complexity is TaskComplexity.SIMPLE
     assert len(plan.steps) == 1
-    assert plan.steps[0].objective == "完成用户任务：读取 app/config.py"
+    assert plan.steps[0].objective == "完成用户任务：读取 app.runtime.config.py"
 
 
 def test_plan_serialization_is_stable_and_json_compatible():
