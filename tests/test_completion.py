@@ -1,9 +1,9 @@
 import json
 
-from app.completion import CompletionStatus, verify_completion
-from app.planner import create_task_plan
-from app.result import ToolResult
-from app.task_state import PlanStateManager
+from app.core.completion import CompletionStatus, verify_completion
+from app.core.planner import create_task_plan
+from app.core.task_state import PlanStateManager
+from app.tools.result import ToolResult
 
 
 def _completed_plan():
