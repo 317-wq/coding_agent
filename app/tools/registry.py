@@ -1,13 +1,16 @@
+"""工具规格、注册表及默认工具集合的构建逻辑。"""
+
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from app import git_tools, tools
-from app.authorization import ConsoleAuthorizer, ToolAuthorizer
-from app.result import ToolResult
-from app.validation import ToolArgumentValidationError, validate_tool_arguments
+from app.tools import tools
+from app.tools import git_tools
+from app.tools.authorization import ConsoleAuthorizer, ToolAuthorizer
+from app.tools.result import ToolResult
+from app.tools.validation import ToolArgumentValidationError, validate_tool_arguments
 
 ToolExecutor = Callable[..., str | ToolResult]
 
