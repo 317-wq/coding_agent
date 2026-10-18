@@ -1,6 +1,6 @@
 import pytest
 
-from app.result import ToolResult, ToolStatus
+from app.tools.result import ToolResult, ToolStatus
 
 
 def test_tool_result_serializes_stable_fields():
