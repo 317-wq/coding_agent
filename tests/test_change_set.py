@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from app.change_set import ChangeSetError, FileChangeKind, TaskChangeSet
-from app.change_snapshot import TaskSnapshotStore
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
+from app.tools.change_set import ChangeSetError, FileChangeKind, TaskChangeSet
+from app.tools.change_snapshot import TaskSnapshotStore
 
 
 def test_reports_created_modified_deleted_and_unchanged_files(tmp_path: Path):
