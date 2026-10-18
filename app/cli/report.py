@@ -50,6 +50,14 @@ class TaskReportRenderer:
         if result.next_steps:
             lines.append("下一步建议：")
             lines.extend(f"  - {step}" for step in result.next_steps)
+        lines.append("关键 Trace：")
+        if result.trace_references:
+            lines.extend(
+                f"  - {item.event}（{item.timestamp}）{': ' + item.summary if item.summary else ''}"
+                for item in result.trace_references
+            )
+        else:
+            lines.append("  - 无关键 Trace 引用")
         lines.append(f"Trace 事件：{result.trace_event_count}")
         return "\n".join(lines)
 

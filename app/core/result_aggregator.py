@@ -12,6 +12,7 @@ from app.core.recovery_summary import summarize_recovery
 from app.core.task_result import TaskResult, TaskStatus
 from app.core.task_suggestions import build_task_suggestions
 from app.core.test_evidence import summarize_test_evidence
+from app.core.trace_summary import summarize_trace
 from app.runtime.trace import ExecutionTrace
 from app.tools.change_set import ChangeSetSummary
 
@@ -57,6 +58,7 @@ class TaskResultAggregator:
             repair_attempts=repair_attempts,
             trace_event_count=len(trace.events) if trace is not None else 0,
             next_steps=build_task_suggestions(status, stop_reason, changes_summary, tests),
+            trace_references=summarize_trace(trace),
         )
 
     @staticmethod
