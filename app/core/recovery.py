@@ -102,6 +102,22 @@ class RecoveryPolicy:
                 paths,
             )
 
+        if signals.test_error_kind == "test_code":
+            return RecoveryDecision(
+                RecoveryAction.REPLAN,
+                "测试代码存在错误，优先修复测试代码后重新运行，不回滚业务修改。",
+                triggers,
+                paths,
+            )
+
+        if signals.test_failed and signals.test_repair_attempts >= 2 and paths:
+            return RecoveryDecision(
+                RecoveryAction.SUGGEST_ROLLBACK,
+                "测试自动修复已达到上限 2 次，询问用户是否回滚当前修改。",
+                triggers,
+                paths,
+            )
+
         if signals.test_failed and signals.test_repair_attempts >= 2:
             return RecoveryDecision(
                 RecoveryAction.STOP,
@@ -110,9 +126,16 @@ class RecoveryPolicy:
                 paths,
             )
 
+        if signals.test_failed:
+            return RecoveryDecision(
+                RecoveryAction.REPLAN,
+                "测试失败，优先分析并自动修复后重新运行测试。",
+                triggers,
+                paths,
+            )
+
         hard_failure = (
-            signals.test_failed
-            or signals.plan_failed
+            signals.plan_failed
             or signals.completion_status is CompletionStatus.BLOCKED
             or signals.consecutive_tool_failures
             >= self.consecutive_failure_threshold
