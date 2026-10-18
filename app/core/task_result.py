@@ -117,6 +117,7 @@ class TaskResult:
     recovery: tuple[RecoveryRecord, ...] = ()
     repair_attempts: int = 0
     trace_event_count: int = 0
+    next_steps: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """校验任务描述、修复次数和 Trace 计数合法。"""
@@ -126,6 +127,8 @@ class TaskResult:
             raise ValueError("自动修复次数不能小于 0。")
         if self.trace_event_count < 0:
             raise ValueError("Trace 事件数量不能小于 0。")
+        if any(not isinstance(item, str) or not item.strip() for item in self.next_steps):
+            raise ValueError("下一步建议必须是非空字符串。")
 
     @property
     def completed(self) -> bool:
@@ -146,6 +149,7 @@ class TaskResult:
             "recovery": [item.to_dict() for item in self.recovery],
             "repair_attempts": self.repair_attempts,
             "trace_event_count": self.trace_event_count,
+            "next_steps": list(self.next_steps),
         }
 
     def to_json(self) -> str:
