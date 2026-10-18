@@ -4,9 +4,9 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any
 
-from app.explorer import ProjectSnapshot
-from app.planner import TaskPlan
-from app.result import ToolResult, ToolStatus
+from app.core.planner import TaskPlan
+from app.runtime.explorer import ProjectSnapshot
+from app.tools.result import ToolResult, ToolStatus
 
 
 @dataclass(frozen=True)
