@@ -39,7 +39,7 @@ def test_hard_failure_without_changes_requests_replan(signals):
     assert decision.action is RecoveryAction.REPLAN
 
 
-def test_hard_failure_with_changes_suggests_rollback_and_serializes():
+def test_test_failure_with_changes_prioritizes_repair():
     decision = decide_recovery(
         RecoverySignals(
             test_failed=True,
@@ -48,12 +48,12 @@ def test_hard_failure_with_changes_suggests_rollback_and_serializes():
         )
     )
 
-    assert decision.action is RecoveryAction.SUGGEST_ROLLBACK
+    assert decision.action is RecoveryAction.REPLAN
     assert decision.recoverable_paths == ("app/main.py", "tests/test_main.py")
     assert decision.triggers == ("测试失败", "计划失败")
 
 
-def test_test_repair_attempt_limit_stops_automatic_recovery():
+def test_test_repair_attempt_limit_requests_rollback_decision():
     decision = decide_recovery(
         RecoverySignals(
             test_failed=True,
@@ -62,7 +62,7 @@ def test_test_repair_attempt_limit_stops_automatic_recovery():
         )
     )
 
-    assert decision.action is RecoveryAction.STOP
+    assert decision.action is RecoveryAction.SUGGEST_ROLLBACK
     assert "上限" in decision.reason
 
 
