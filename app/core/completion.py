@@ -83,13 +83,6 @@ class CompletionVerifier:
                 pending,
                 failed,
             )
-        if pending:
-            return CompletionDecision(
-                CompletionStatus.INCOMPLETE,
-                "仍有计划步骤未完成。",
-                pending,
-                evidence=("计划状态",),
-            )
 
         failed_tools = tuple(
             result.error or result.result or "工具执行失败"
@@ -127,6 +120,22 @@ class CompletionVerifier:
             return CompletionDecision(
                 CompletionStatus.INCOMPLETE,
                 "缺少工具或测试的结构化完成证据。",
+            )
+        # 计划状态可能因模型未逐步回写而滞后；只有目标测试也通过时，
+        # 才允许代码证据覆盖 pending 状态，避免单个任意工具调用误报完成。
+        if pending and not successful_tests:
+            return CompletionDecision(
+                CompletionStatus.INCOMPLETE,
+                "仍有计划步骤未完成，且缺少通过的目标测试证据。",
+                pending,
+                evidence=evidence,
+            )
+        if pending:
+            return CompletionDecision(
+                CompletionStatus.COMPLETE,
+                "已有代码修改和目标测试等结构化证据，计划状态未完全同步。",
+                pending,
+                evidence=evidence,
             )
         return CompletionDecision(
             CompletionStatus.COMPLETE,
