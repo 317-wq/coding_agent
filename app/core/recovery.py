@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from app.completion import CompletionStatus
+from app.core.completion import CompletionStatus
 
 
 class RecoveryAction(StrEnum):
