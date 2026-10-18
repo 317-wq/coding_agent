@@ -1,3 +1,4 @@
+"""Agent 内置工具实现：文件读写、搜索、测试和命令执行。"""
 
 import os
 import shutil
@@ -6,11 +7,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from app.runtime.workspace import WorkspaceContext
 
-from app.workspace import WorkspaceContext
-
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WORKSPACE = (PROJECT_ROOT / "workspace" / "demo").resolve()
 WORKSPACE = DEFAULT_WORKSPACE
 WORKSPACE_CONTEXT = WorkspaceContext(root=WORKSPACE)
