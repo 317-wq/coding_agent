@@ -7,6 +7,7 @@ from app.completion import CompletionStatus, verify_completion
 from app.complexity import judge_task_complexity
 from app.context import ContextManager
 from app.explorer import ProjectExplorer
+from app.git_repository import inspect_git_repository
 from app.model import ModelAdapter
 from app.planner import TaskPlan, create_task_plan
 from app.recovery import RecoveryAction, RecoveryDecision
@@ -80,6 +81,8 @@ class Agent:
             workspace=str(self.workspace.root),
         )
         project_snapshot = ProjectExplorer(self.workspace).explore()
+        git_info = inspect_git_repository(self.workspace)
+        trace.record("git_baseline_detected", **git_info.to_dict())
         decision = judge_task_complexity(task, project_snapshot)
         trace.record(
             "complexity_decided",
@@ -205,10 +208,29 @@ class Agent:
                     if decision.status is not CompletionStatus.COMPLETE:
                         recovery = safety.observe_completion(decision.status)
                         self.last_recovery_decision = recovery
+                        trace.record(
+                            "recovery_decided",
+                            action=recovery.action.value,
+                            reason=recovery.reason,
+                            triggers=recovery.triggers,
+                            recoverable_paths=recovery.recoverable_paths,
+                        )
                         if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
+                            trace.record(
+                                "rollback_authorization_requested",
+                                paths=recovery.recoverable_paths,
+                                reason=recovery.reason,
+                            )
                             rollback = AuthorizedRollback(
                                 safety.change_set, self.registry.authorizer
                             ).execute()
+                            trace.record(
+                                "rollback_finished",
+                                status=rollback.status.value,
+                                reason=rollback.reason,
+                                restored_paths=rollback.restored_paths,
+                                pending_paths=rollback.pending_paths,
+                            )
                             if rollback.status is not RollbackStatus.RESTORED:
                                 reason = f"恢复未完成：{rollback.reason}"
                                 trace.record("task_stopped", reason=reason)
@@ -359,7 +381,13 @@ class Agent:
                 )
 
                 try:
-                    safety.prepare_tool(tool_name, arguments)
+                    snapshot_paths = safety.prepare_tool(tool_name, arguments)
+                    if snapshot_paths:
+                        trace.record(
+                            "snapshot_created",
+                            tool=tool_name,
+                            paths=snapshot_paths,
+                        )
                     tool_result = self.registry.execute(tool_name, arguments)
                 except KeyboardInterrupt:
                     trace.record(
@@ -441,6 +469,22 @@ class Agent:
                         f"无法生成安全恢复决策：{exc}",
                     )
                 self.last_recovery_decision = recovery
+                change_summary = safety.change_set.summary()
+                trace.record(
+                    "change_set_updated",
+                    touched_count=change_summary.touched_count,
+                    changed_count=len(change_summary.changes),
+                    created_paths=change_summary.created_paths,
+                    modified_paths=change_summary.modified_paths,
+                    deleted_paths=change_summary.deleted_paths,
+                )
+                trace.record(
+                    "recovery_decided",
+                    action=recovery.action.value,
+                    reason=recovery.reason,
+                    triggers=recovery.triggers,
+                    recoverable_paths=recovery.recoverable_paths,
+                )
 
                 trace.record(
                     "tool_call_finished",
@@ -463,9 +507,21 @@ class Agent:
                 )
 
                 if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
+                    trace.record(
+                        "rollback_authorization_requested",
+                        paths=recovery.recoverable_paths,
+                        reason=recovery.reason,
+                    )
                     rollback = AuthorizedRollback(
                         safety.change_set, self.registry.authorizer
                     ).execute()
+                    trace.record(
+                        "rollback_finished",
+                        status=rollback.status.value,
+                        reason=rollback.reason,
+                        restored_paths=rollback.restored_paths,
+                        pending_paths=rollback.pending_paths,
+                    )
                     if rollback.status is not RollbackStatus.RESTORED:
                         reason = f"恢复未完成：{rollback.reason}"
                         trace.record("task_stopped", reason=reason)
