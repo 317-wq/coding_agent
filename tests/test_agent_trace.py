@@ -78,9 +78,8 @@ def test_trace_records_git_snapshot_changes_and_recovery(monkeypatch, tmp_path):
                 "required": ["path", "content"],
                 "additionalProperties": False,
             },
-            executor=lambda path, content: (
-                (tmp_path / path).write_text(content, encoding="utf-8")
-                or "创建成功"
+            executor=lambda path, content: _create_file(
+                tmp_path, path, content
             ),
         )
     )
@@ -113,3 +112,8 @@ def test_trace_records_git_snapshot_changes_and_recovery(monkeypatch, tmp_path):
     assert "snapshot_created" in names
     assert "change_set_updated" in names
     assert "recovery_decided" in names
+
+
+def _create_file(root, path, content):
+    (root / path).write_text(content, encoding="utf-8")
+    return "创建成功"
