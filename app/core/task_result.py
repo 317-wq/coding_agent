@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from app.core.trace_summary import TraceReference
+
 
 class TaskStatus(StrEnum):
     """任务执行的最终状态。"""
@@ -118,6 +120,7 @@ class TaskResult:
     repair_attempts: int = 0
     trace_event_count: int = 0
     next_steps: tuple[str, ...] = ()
+    trace_references: tuple[TraceReference, ...] = ()
 
     def __post_init__(self) -> None:
         """校验任务描述、修复次数和 Trace 计数合法。"""
@@ -129,6 +132,8 @@ class TaskResult:
             raise ValueError("Trace 事件数量不能小于 0。")
         if any(not isinstance(item, str) or not item.strip() for item in self.next_steps):
             raise ValueError("下一步建议必须是非空字符串。")
+        if any(not isinstance(item, TraceReference) for item in self.trace_references):
+            raise TypeError("Trace 引用必须是 TraceReference。")
 
     @property
     def completed(self) -> bool:
@@ -150,6 +155,7 @@ class TaskResult:
             "repair_attempts": self.repair_attempts,
             "trace_event_count": self.trace_event_count,
             "next_steps": list(self.next_steps),
+            "trace_references": [item.to_dict() for item in self.trace_references],
         }
 
     def to_json(self) -> str:
