@@ -55,3 +55,11 @@ def test_planner_preserves_explicit_complexity_decision():
 def test_empty_task_is_rejected():
     with pytest.raises(ValueError, match="任务文本不能为空"):
         TaskPlanner().plan(" ")
+
+
+def test_planner_does_not_create_number_or_heading_steps():
+    task = "1、创建 calculator.py。2、补充 pytest 测试。"
+    plan = create_task_plan(task, decision=judge_task_complexity(task))
+
+    assert all(step.objective not in {"完成：1", "完成：2"} for step in plan.steps)
+    assert all("calculator.py" in step.objective or "pytest" in step.objective for step in plan.steps)
