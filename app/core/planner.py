@@ -96,8 +96,7 @@ class TaskPlanner:
 
     @staticmethod
     def _extract_objectives(task: str, complexity: TaskComplexity) -> list[str]:
-        # 计划按开发意图拆分，而不是按句号、编号或标题机械切片。
-        # 先移除常见列表标记，再只在相邻片段都包含行动意图时拆分。
+        # 计划按开发意图归并，而不是按句号、编号或连接词机械切片。
         normalized = re.sub(
             r"(?m)^\s*(?:#{1,6}\s*|(?:\d+|[一二三四五六七八九十]+)[、.)）:]\s*)",
             "",
@@ -129,11 +128,37 @@ class TaskPlanner:
             cleaned = "；".join(parts) if parts else normalized.strip()
             return [f"完成用户任务：{cleaned}"]
 
+        # 长任务通常是需求清单。把多个细节归并成少量可验证的开发目标，
+        # 避免每个函数、编号或断言都变成独立计划步骤。
+        if len(parts) > 5 or len(normalized) > 180:
+            objectives: list[str] = []
+            lowered = normalized.lower()
+            if re.search(r"阅读|查看|读取|现有代码|项目结构|检查", normalized):
+                objectives.append("阅读现有代码和项目结构")
+            if re.search(r"实现|新增|添加|创建|修改|更新|修复|重构|优化", normalized):
+                objectives.append("实现或修改任务要求的功能")
+            if re.search(r"测试|pytest|用例|断言", lowered):
+                objectives.append("编写或补充测试用例")
+            if re.search(r"运行测试|执行测试|验证|通过测试", normalized):
+                objectives.append("运行指定测试并记录结果")
+            objectives.append("总结实现结果和验证情况")
+            return [f"完成：{objective}" for objective in objectives]
+
         return [f"完成：{part}" for part in parts]
 
     @staticmethod
     def _criteria_for(objective: str) -> str:
-        return f"工具结果表明已完成“{objective}”，且没有未处理错误。"
+        if "总结" in objective:
+            return "已汇总修改文件、实现内容和测试验证结果。"
+        if "阅读" in objective or "读取" in objective or "项目结构" in objective:
+            return "相关源文件或项目结构已读取，并形成可用于实现的上下文。"
+        if "测试" in objective and ("编写" in objective or "补充" in objective):
+            return "指定测试文件已创建或更新，并覆盖任务要求的关键场景。"
+        if "运行" in objective or "验证" in objective:
+            return "指定测试命令已执行，并记录了实际通过或失败结果。"
+        if "实现" in objective or "修改" in objective:
+            return "相关代码已创建或修改，并满足用户明确要求。"
+        return f"已获得与“{objective}”对应的工具或测试证据，且没有未处理错误。"
 
 
 def create_task_plan(
