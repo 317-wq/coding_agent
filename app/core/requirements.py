@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
 
 
 @dataclass(frozen=True)
