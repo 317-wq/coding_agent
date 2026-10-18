@@ -555,11 +555,30 @@ def run_tests(test_path: str = ".") -> str:
 
         output = (result.stdout + "\n" + result.stderr).strip()
         status = "通过" if result.returncode == 0 else "失败"
+        error_kind = ""
+        if result.returncode != 0:
+            lowered = output.lower()
+            if (
+                "import file mismatch" in lowered
+                or "error collecting" in lowered
+                or "importerror while importing test module" in lowered
+            ):
+                error_kind = "测试错误类型：收集冲突\n"
+            elif (
+                "no module named pytest" in lowered
+                or "modulenotfounderror" in lowered
+                or "timeout" in lowered
+                or "测试执行失败" in lowered
+            ):
+                error_kind = "测试错误类型：环境错误\n"
+            else:
+                error_kind = "测试错误类型：断言失败\n"
 
         return (
             f"测试目标：{test_path}\n"
             f"测试退出码：{result.returncode}\n"
             f"测试结果：{status}\n"
+            f"{error_kind}"
             f"{output}"
         )
 
