@@ -8,8 +8,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from app.change_snapshot import FileSnapshot, TaskSnapshotStore
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
+from app.tools.change_snapshot import FileSnapshot, TaskSnapshotStore
 
 
 class ChangeSetError(ValueError):
