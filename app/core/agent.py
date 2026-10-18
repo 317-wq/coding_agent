@@ -12,7 +12,7 @@ from app.core.recovery import RecoveryAction, RecoveryDecision
 from app.core.requirements import TaskRequirementVerifier
 from app.core.result_aggregator import TaskResultAggregator
 from app.core.task_result import TaskResult, TaskStatus
-from app.core.task_safety import TaskSafetySession
+from app.core.task_safety import TaskConstraintViolation, TaskSafetySession
 from app.core.task_state import PlanStateManager
 from app.runtime.explorer import ProjectExplorer
 from app.runtime.model import ModelAdapter
@@ -153,7 +153,7 @@ class Agent:
         self.last_context = ContextManager(
             task, project_snapshot, self.last_plan
         )
-        safety = TaskSafetySession(self.workspace)
+        safety = TaskSafetySession(self.workspace, task=task)
         self.last_safety = safety
         self.last_change_set = safety.change_set
 
@@ -503,6 +503,7 @@ class Agent:
                 )
 
                 try:
+                    safety.validate_tool(tool_name, arguments)
                     snapshot_paths = safety.prepare_tool(tool_name, arguments)
                     if snapshot_paths:
                         trace.record(
@@ -519,12 +520,22 @@ class Agent:
                     )
                     self._print_trace_summary(trace)
                     raise
+                except TaskConstraintViolation as exc:
+                    trace.record("task_stopped", reason="user_constraint_violation", error=str(exc))
+                    self._print_trace_summary(trace)
+                    return str(exc)
                 except Exception as exc:  # noqa: BLE001 - tool boundary
                     tool_result = ToolResult.failure(
                         f"工具执行异常：{exc}"
                     )
 
                 tool_call_count += 1
+
+                if tool_result.status is ToolStatus.FAILURE and self._is_boundary_failure(tool_result):
+                    reason = tool_result.error or "工具访问违反工作区安全边界。"
+                    trace.record("task_stopped", reason="workspace_boundary_violation", error=reason)
+                    self._print_trace_summary(trace)
+                    return reason
 
                 if self.last_context is not None:
                     before_trim = self.last_context.context.truncated_count
@@ -753,3 +764,10 @@ class Agent:
             f"已达到最大执行轮数 {self.max_steps}，停止自动执行。"
             "请检查当前工作区的代码和测试结果，再决定是否继续。"
         )
+
+    @staticmethod
+    def _is_boundary_failure(result: ToolResult) -> bool:
+        """判断工具失败是否属于不可继续的工作区边界违规。"""
+        message = result.error or ""
+        markers = ("工作目录之外", "工作区之外", "路径越界", "符号链接")
+        return any(marker in message for marker in markers)
