@@ -2,17 +2,17 @@
 
 from typing import Any
 
-from app.change_set import ChangeSetError, TaskChangeSet
-from app.completion import CompletionStatus
-from app.recovery import (
+from app.core.completion import CompletionStatus
+from app.core.recovery import (
     RecoveryAction,
     RecoveryDecision,
     RecoveryPolicy,
     RecoverySignals,
 )
-from app.result import ToolResult, ToolStatus
-from app.rollback import RollbackStatus
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
+from app.tools.change_set import ChangeSetError, TaskChangeSet
+from app.tools.result import ToolResult, ToolStatus
+from app.tools.rollback import RollbackStatus
 
 FILE_MUTATION_TOOLS = {"create_file", "edit_file", "delete_file"}
 
