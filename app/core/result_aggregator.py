@@ -10,6 +10,7 @@ from app.core.context import TaskContext
 from app.core.recovery import RecoveryDecision
 from app.core.recovery_summary import summarize_recovery
 from app.core.task_result import TaskResult, TaskStatus
+from app.core.task_suggestions import build_task_suggestions
 from app.core.test_evidence import summarize_test_evidence
 from app.runtime.trace import ExecutionTrace
 from app.tools.change_set import ChangeSetSummary
@@ -43,16 +44,19 @@ class TaskResultAggregator:
         # restored_paths 表示恢复过的路径，不是未恢复路径；只有回滚事件的
         # pending_paths 才进入 unresolved，见 _recovery_records。
         unresolved = self._unresolved_paths(trace)
+        changes_summary = build_change_summary(changes, unresolved)
+        tests = summarize_test_evidence(context.test_results)
         return TaskResult(
             task=context.task,
             status=status,
             summary=self._summary(status, completion, changes),
             stop_reason=stop_reason,
-            changes=build_change_summary(changes, unresolved),
-            tests=summarize_test_evidence(context.test_results),
+            changes=changes_summary,
+            tests=tests,
             recovery=recovery_records,
             repair_attempts=repair_attempts,
             trace_event_count=len(trace.events) if trace is not None else 0,
+            next_steps=build_task_suggestions(status, stop_reason, changes_summary, tests),
         )
 
     @staticmethod

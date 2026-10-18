@@ -47,6 +47,9 @@ class TaskReportRenderer:
         lines.append(RecoverySummaryBuilder.render(result.recovery, result.repair_attempts))
         if result.stop_reason:
             lines.append(f"未完成原因：{result.stop_reason}")
+        if result.next_steps:
+            lines.append("下一步建议：")
+            lines.extend(f"  - {step}" for step in result.next_steps)
         lines.append(f"Trace 事件：{result.trace_event_count}")
         return "\n".join(lines)
 
