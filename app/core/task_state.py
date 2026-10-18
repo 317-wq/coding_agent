@@ -89,8 +89,40 @@ class PlanStateManager:
             objective_scores.append((score, step.step_id))
         if not objective_scores:
             return None
-        best_score, best_id = max(objective_scores)
+        # 分数相同时保留更早的步骤，避免后面的无关步骤抢占当前工具结果。
+        best_score, best_id = max(objective_scores, key=lambda item: (item[0], -item[1]))
         return best_id if best_score > 0 else min(step_id for _, step_id in objective_scores)
+
+    def can_complete_step(
+        self, step_id: int, tool_name: str, arguments: dict[str, Any], result: Any
+    ) -> bool:
+        """只有工具类型、目标路径和成功结果共同满足时才允许完成步骤。"""
+
+        status = getattr(result, "status", None)
+        if status is None or getattr(status, "value", status) != "success":
+            return False
+        known_tools = {
+            "run_tests", "list_files", "read_file", "search_code",
+            "create_file", "edit_file", "create_directory", "delete_file",
+            "delete_directory",
+        }
+        if tool_name not in known_tools:
+            return True
+        text = self._step(step_id).objective
+        path = str(arguments.get("path", "")).lower()
+        if "阅读" in text or "读取" in text or "项目结构" in text:
+            return tool_name in {"list_files", "read_file", "search_code"}
+        if "编写" in text or "补充" in text:
+            return tool_name in {"create_file", "edit_file"} and (
+                path.startswith("tests/") or "/tests/" in path
+            )
+        if "运行" in text or "验证" in text:
+            return tool_name == "run_tests"
+        if "实现" in text or "修改" in text or "功能" in text:
+            return tool_name in {"create_file", "edit_file", "create_directory"} and not (
+                path.startswith("tests/") or "/tests/" in path
+            )
+        return tool_name in {"create_file", "edit_file", "run_tests"}
 
     def complete_step(self, step_id: int, result: Any = None) -> TaskPlan:
         del result  # 结果由上下文模块保存；此处只负责状态流转。
