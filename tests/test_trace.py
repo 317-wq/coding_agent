@@ -1,6 +1,6 @@
 import json
 
-from app.trace import REDACTED, ExecutionTrace
+from app.runtime.trace import REDACTED, ExecutionTrace
 
 
 def test_trace_records_workspace_and_structured_tool_statistics(tmp_path):
