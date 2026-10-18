@@ -1,0 +1,41 @@
+%% MVP 0.4 策略闭环：目标规划、步骤匹配、测试分类、自动修复与授权回滚
+flowchart TD
+    Task[用户任务] --> Planner[目标归并式 Planner]
+    Planner --> Goals[阅读现有代码<br/>实现功能<br/>编写测试<br/>运行测试<br/>总结结果]
+    Goals --> State[PlanStateManager]
+
+    State -->|工具名称 + 目标路径| Match{匹配步骤与完成条件}
+    Match -->|读取工具| Read[读取/搜索工作区]
+    Match -->|业务文件路径| Implement[创建或修改业务代码]
+    Match -->|tests/ 路径| TestCode[创建或修改测试代码]
+    Match -->|测试工具| RunTests[运行指定测试路径]
+
+    Read --> Result[ToolResult]
+    Implement --> Result
+    TestCode --> Result
+    RunTests --> TestResult[测试结果]
+    Result --> StateUpdate{对应完成条件满足?}
+    TestResult --> StateUpdate
+    StateUpdate -->|是| Completed[更新对应步骤为 completed]
+    StateUpdate -->|否| Pending[保持原步骤状态]
+
+    TestResult --> Classify{测试错误分类}
+    Classify -->|通过| Verify[完成判定]
+    Classify -->|断言失败| Repair[自动修复流程]
+    Classify -->|测试代码错误| Repair
+    Classify -->|收集冲突/环境错误| Ask[请求用户处理]
+
+    Repair --> Count{修改后重跑次数 < 2?}
+    Count -->|是| TestCode
+    Count -->|否| Recovery[恢复策略]
+    Recovery -->|建议回滚| Authorize{用户授权?}
+    Authorize -->|同意| Rollback[恢复任务变更并重新规划]
+    Authorize -->|拒绝| Keep[保留现有修改并重新评估]
+    Keep --> Verify
+    Rollback --> Planner
+    Verify --> Done[输出修改与测试总结]
+
+    Path[路径约定：优先使用工作区相对路径<br/>根目录使用 .] -.-> Read
+    Path -.-> Implement
+    Path -.-> TestCode
+    Path -.-> RunTests
