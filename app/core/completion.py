@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from app.planner import PlanStepStatus, TaskPlan
-from app.result import ToolResult, ToolStatus
+from app.core.planner import PlanStepStatus, TaskPlan
+from app.tools.result import ToolResult, ToolStatus
 
 
 class CompletionStatus(StrEnum):
