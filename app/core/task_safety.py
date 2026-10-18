@@ -33,6 +33,7 @@ class TaskSafetySession:
         self.workspace = workspace
         self.task = task
         self.mutations_forbidden = self._detect_mutation_prohibition(task)
+        self.validation_only = self._detect_validation_task(task)
         self.policy = policy or RecoveryPolicy()
         self.change_set = TaskChangeSet(workspace)
         self.consecutive_tool_failures = 0
@@ -56,6 +57,15 @@ class TaskSafetySession:
             "仅允许读取",
         )
         return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _detect_validation_task(task: str) -> bool:
+        """识别只需验证一次结果、失败后不应继续探索的任务。"""
+        markers = (
+            "安全边界", "完成状态", "验收", "越界", "只尝试一次",
+            "仅验证", "仅检查", "验证是否", "检查是否",
+        )
+        return any(marker in task for marker in markers)
 
     def validate_tool(self, tool_name: str, arguments: dict[str, Any]) -> None:
         """在执行工具前 enforcing 用户任务级安全约束。"""
