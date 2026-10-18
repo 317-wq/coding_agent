@@ -64,6 +64,34 @@ class PlanStateManager:
             raise ValueError("只有 pending 步骤可以开始。")
         return self._replace_step(step_id, PlanStepStatus.RUNNING)
 
+    def match_step(self, tool_name: str, arguments: dict[str, Any]) -> int | None:
+        """根据工具能力和目标路径选择匹配的 pending 步骤。"""
+
+        path = str(arguments.get("path", "")).lower()
+        objective_scores: list[tuple[int, int]] = []
+        for step in self._plan.steps:
+            if step.status is not PlanStepStatus.PENDING:
+                continue
+            text = step.objective.lower()
+            score = 0
+            if tool_name in {"list_files", "read_file", "search_code"} and any(
+                word in text for word in ("阅读", "读取", "项目结构", "搜索")
+            ):
+                score += 4
+            if tool_name in {"create_file", "edit_file", "create_directory", "delete_file", "delete_directory"}:
+                if path.startswith("tests/") or "/tests/" in path:
+                    score += 5 if "测试" in text else 0
+                score += 4 if any(word in text for word in ("实现", "修改", "功能")) else 0
+            if tool_name == "run_tests":
+                score += 6 if "运行" in text or "验证" in text else 0
+            if tool_name not in {"run_tests", "list_files", "read_file", "search_code", "create_file", "edit_file", "create_directory", "delete_file", "delete_directory"}:
+                score += 1
+            objective_scores.append((score, step.step_id))
+        if not objective_scores:
+            return None
+        best_score, best_id = max(objective_scores)
+        return best_id if best_score > 0 else min(step_id for _, step_id in objective_scores)
+
     def complete_step(self, step_id: int, result: Any = None) -> TaskPlan:
         del result  # 结果由上下文模块保存；此处只负责状态流转。
         self._ensure_running(step_id)
