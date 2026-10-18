@@ -566,11 +566,12 @@ def run_tests(test_path: str = ".") -> str:
                 error_kind = "测试错误类型：收集冲突\n"
             elif (
                 "no module named pytest" in lowered
-                or "modulenotfounderror" in lowered
                 or "timeout" in lowered
                 or "测试执行失败" in lowered
             ):
                 error_kind = "测试错误类型：环境错误\n"
+            elif "nameerror" in lowered or "syntaxerror" in lowered:
+                error_kind = "测试错误类型：测试代码\n"
             else:
                 error_kind = "测试错误类型：断言失败\n"
 
