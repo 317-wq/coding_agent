@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.change_summary import build_change_summary
 from app.core.completion import CompletionDecision, CompletionStatus
 from app.core.context import TaskContext
 from app.core.recovery import RecoveryDecision
 from app.core.task_result import (
-    ChangeSummary,
     RecoveryRecord,
     TaskResult,
     TaskStatus,
@@ -51,12 +51,7 @@ class TaskResultAggregator:
             status=status,
             summary=self._summary(status, completion, changes),
             stop_reason=stop_reason,
-            changes=ChangeSummary(
-                created=changes.created_paths,
-                modified=changes.modified_paths,
-                deleted=changes.deleted_paths,
-                unresolved=unresolved,
-            ),
+            changes=build_change_summary(changes, unresolved),
             tests=summarize_test_evidence(context.test_results),
             recovery=tuple(recovery_records),
             repair_attempts=repair_attempts,
