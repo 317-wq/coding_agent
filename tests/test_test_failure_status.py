@@ -63,3 +63,13 @@ def test_name_error_in_test_code_is_classified_for_repair(tmp_path: Path):
     result = tools.run_tests("test_calculator.py")
 
     assert "测试错误类型：测试代码" in result
+
+
+def test_list_files_accepts_workspace_absolute_path(tmp_path: Path):
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+    (tmp_path / "calculator.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    result = tools.list_files(str(tmp_path))
+
+    assert "calculator.py" in result
+    assert not result.startswith("错误：")
