@@ -1,3 +1,5 @@
+"""工作区路径管理与文件访问边界控制。"""
+
 from dataclasses import dataclass
 from pathlib import Path
 
