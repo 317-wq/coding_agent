@@ -5,10 +5,10 @@ from types import SimpleNamespace
 import pytest
 
 from app import tools
-from app.agent import Agent
-from app.registry import ToolRegistry, ToolSpec
-from app.result import ToolResult
-from app.workspace import WorkspaceContext
+from app.core.agent import Agent
+from app.runtime.workspace import WorkspaceContext
+from app.tools.registry import ToolRegistry, ToolSpec
+from app.tools.result import ToolResult
 
 EMPTY_PARAMETERS = {
     "type": "object",
@@ -79,7 +79,7 @@ def test_agent_returns_failure_json_and_stops_current_tool_batch(
             }
             return make_response(content="已处理失败")
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
     assert agent.run("测试失败") == "完成判定已阻塞且没有可恢复变更，停止当前执行。"
@@ -113,7 +113,7 @@ def test_agent_returns_cancelled_json_and_continues(monkeypatch, tmp_path: Path)
             assert json.loads(messages[-1]["content"])["status"] == "cancelled"
             return make_response(content="取消已确认")
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
     assert agent.run("测试取消") == "取消已确认"
@@ -140,7 +140,7 @@ def test_agent_returns_structured_json_for_invalid_arguments(
             assert result["error"].startswith("工具参数解析失败：")
             return make_response(content="参数错误已处理")
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
     assert agent.run("测试参数") == "完成判定已阻塞且没有可恢复变更，停止当前执行。"
@@ -162,7 +162,7 @@ def test_agent_keeps_tool_call_limit(monkeypatch, tmp_path: Path):
                 ]
             )
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(
         WorkspaceContext.from_path(tmp_path),
         max_tool_calls=1,
@@ -185,7 +185,7 @@ def test_agent_keeps_step_limit(monkeypatch, tmp_path: Path):
                 tool_calls=[make_tool_call("noop", "call-1")]
             )
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(
         WorkspaceContext.from_path(tmp_path), max_steps=1, registry=registry
     )
