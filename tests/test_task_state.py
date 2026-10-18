@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from app.planner import PlanStepStatus, create_task_plan
-from app.task_state import PlanStateManager
+from app.core.planner import PlanStepStatus, create_task_plan
+from app.core.task_state import PlanStateManager
 
 
 @pytest.fixture
