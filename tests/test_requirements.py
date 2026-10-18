@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from app.requirements import TaskRequirementVerifier
-from app.workspace import WorkspaceContext
+from app.core.requirements import TaskRequirementVerifier
+from app.runtime.workspace import WorkspaceContext
 
 
 def test_verifies_explicit_path_exception_and_pytest_requirements(tmp_path: Path):
