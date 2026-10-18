@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from app.change_snapshot import SnapshotError, TaskSnapshotStore
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
+from app.tools.change_snapshot import SnapshotError, TaskSnapshotStore
 
 
 def test_captures_existing_file_content_permission_and_metadata(tmp_path: Path):
