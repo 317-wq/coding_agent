@@ -7,9 +7,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from app.authorization import ConsoleAuthorizer, ToolAuthorizer
-from app.change_set import ChangeSetError, TaskChangeSet
-from app.change_snapshot import FileSnapshot
+from app.tools.authorization import ConsoleAuthorizer, ToolAuthorizer
+from app.tools.change_set import ChangeSetError, TaskChangeSet
+from app.tools.change_snapshot import FileSnapshot
 
 
 class RollbackStatus(StrEnum):
