@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from app.change_set import ChangeSetError
-from app.recovery import RecoveryAction
-from app.result import ToolResult
-from app.rollback import RollbackStatus
-from app.task_safety import TaskSafetySession
-from app.workspace import WorkspaceContext
+from app.core.recovery import RecoveryAction
+from app.core.task_safety import TaskSafetySession
+from app.runtime.workspace import WorkspaceContext
+from app.tools.change_set import ChangeSetError
+from app.tools.result import ToolResult
+from app.tools.rollback import RollbackStatus
 
 
 def test_prepare_file_mutation_keeps_first_snapshot(tmp_path: Path):
