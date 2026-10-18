@@ -30,6 +30,7 @@ class TaskSafetySession:
         self.change_set = TaskChangeSet(workspace)
         self.consecutive_tool_failures = 0
         self.recovery_attempts = 0
+        self.test_repair_attempts = 0
 
     def prepare_tool(self, tool_name: str, arguments: dict[str, Any]) -> tuple[str, ...]:
         """在写入型工具执行前捕获所有可能受影响的普通文件。"""
@@ -75,13 +76,23 @@ class TaskSafetySession:
                 triggers=("变更集异常",),
             )
         recoverable_paths = tuple(change.path for change in summary.changes)
+        test_error_kind = None
+        test_failed = False
+        if tool_name == "run_tests" and result.status is ToolStatus.FAILURE:
+            message = result.error or ""
+            if "测试错误类型：收集冲突" in message:
+                test_error_kind = "collection"
+            elif "测试错误类型：环境错误" in message:
+                test_error_kind = "environment"
+            else:
+                test_failed = True
+                self.test_repair_attempts += 1
         return self.policy.decide(
             RecoverySignals(
                 consecutive_tool_failures=self.consecutive_tool_failures,
-                test_failed=(
-                    tool_name == "run_tests"
-                    and result.status is ToolStatus.FAILURE
-                ),
+                test_failed=test_failed,
+                test_error_kind=test_error_kind,
+                test_repair_attempts=self.test_repair_attempts,
                 plan_failed=plan_failed,
                 recoverable_paths=recoverable_paths,
                 recovery_attempts=self.recovery_attempts,
