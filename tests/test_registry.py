@@ -5,15 +5,15 @@ from types import SimpleNamespace
 import pytest
 
 from app import git_tools, tools
-from app.agent import Agent
-from app.registry import (
+from app.core.agent import Agent
+from app.runtime.workspace import WorkspaceContext
+from app.tools.registry import (
     DEFAULT_TOOL_REGISTRY,
     RiskLevel,
     ToolRegistry,
     ToolSpec,
 )
-from app.result import ToolResult, ToolStatus
-from app.workspace import WorkspaceContext
+from app.tools.result import ToolResult, ToolStatus
 
 
 @pytest.fixture(autouse=True)
@@ -134,7 +134,7 @@ def test_agent_uses_injected_registry_for_definition_and_execution(
                 message = SimpleNamespace(content="完成", tool_calls=None)
             return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(
         workspace=WorkspaceContext.from_path(tmp_path), registry=registry
     )
