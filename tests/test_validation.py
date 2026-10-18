@@ -1,8 +1,8 @@
 import pytest
 
-from app.registry import ToolRegistry, ToolSpec
-from app.result import ToolStatus
-from app.validation import ToolArgumentValidationError, validate_tool_arguments
+from app.tools.registry import ToolRegistry, ToolSpec
+from app.tools.result import ToolStatus
+from app.tools.validation import ToolArgumentValidationError, validate_tool_arguments
 
 SCHEMA = {
     "type": "object",
