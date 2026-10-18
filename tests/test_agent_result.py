@@ -82,7 +82,7 @@ def test_agent_returns_failure_json_and_stops_current_tool_batch(
     monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
-    assert agent.run("测试失败") == "已处理失败"
+    assert agent.run("测试失败") == "完成判定已阻塞且没有可恢复变更，停止当前执行。"
     assert executions == ["fail"]
     events = agent.last_trace.get_events()
     started = next(event for event in events if event["event"] == "task_started")
@@ -143,7 +143,7 @@ def test_agent_returns_structured_json_for_invalid_arguments(
     monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
-    assert agent.run("测试参数") == "参数错误已处理"
+    assert agent.run("测试参数") == "完成判定已阻塞且没有可恢复变更，停止当前执行。"
 
 
 def test_agent_keeps_tool_call_limit(monkeypatch, tmp_path: Path):
