@@ -1,11 +1,17 @@
+"""将用户任务拆解为可跟踪执行的计划步骤。"""
+
 import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from app.complexity import ComplexityDecision, TaskComplexity, judge_task_complexity
-from app.explorer import ProjectSnapshot
+from app.core.complexity import (
+    ComplexityDecision,
+    TaskComplexity,
+    judge_task_complexity,
+)
+from app.runtime.explorer import ProjectSnapshot
 
 
 class PlanStepStatus(StrEnum):
