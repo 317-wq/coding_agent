@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from app.context import ContextManager
-from app.planner import create_task_plan
-from app.result import ToolResult
+from app.core.context import ContextManager
+from app.core.planner import create_task_plan
+from app.tools.result import ToolResult
 
 
 def test_context_keeps_task_plan_and_results_serializable():
