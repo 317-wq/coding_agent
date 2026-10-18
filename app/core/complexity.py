@@ -1,9 +1,11 @@
+"""根据任务描述和项目上下文评估任务复杂度。"""
+
 import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from app.explorer import ProjectSnapshot
+from app.runtime.explorer import ProjectSnapshot
 
 
 class TaskComplexity(StrEnum):
