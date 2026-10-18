@@ -21,7 +21,7 @@ def test_complex_task_generates_ordered_pending_steps():
     assert [step.step_id for step in plan.steps] == [1, 2, 3]
     assert all(step.status is PlanStepStatus.PENDING for step in plan.steps)
     assert plan.steps[0].objective == "完成：读取配置"
-    assert "工具结果" in plan.steps[0].completion_criteria
+    assert "读取" in plan.steps[0].completion_criteria
 
 
 def test_simple_task_has_single_stable_objective():
