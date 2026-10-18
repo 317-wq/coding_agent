@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Sequence
 from typing import Any
 
 from app.core.completion import CompletionDecision, CompletionStatus
@@ -14,15 +12,10 @@ from app.core.task_result import (
     RecoveryRecord,
     TaskResult,
     TaskStatus,
-    TestEvidence,
-    TestEvidenceStatus,
 )
+from app.core.test_evidence import summarize_test_evidence
 from app.runtime.trace import ExecutionTrace
 from app.tools.change_set import ChangeSetSummary
-
-_TEST_TARGET = re.compile(r"测试目标：([^\n]+)")
-_TEST_EXIT = re.compile(r"测试退出码：(-?\d+)")
-_TEST_ERROR = re.compile(r"测试错误类型：([^\n]+)")
 
 
 class TaskResultAggregator:
@@ -39,6 +32,7 @@ class TaskResultAggregator:
         repair_attempts: int = 0,
         task_status: TaskStatus | None = None,
     ) -> TaskResult:
+        """从任务运行时证据创建唯一、可序列化的任务结果。"""
         if not isinstance(context, TaskContext):
             raise TypeError("任务上下文必须是 TaskContext。")
         if not isinstance(changes, ChangeSetSummary):
@@ -63,7 +57,7 @@ class TaskResultAggregator:
                 deleted=changes.deleted_paths,
                 unresolved=unresolved,
             ),
-            tests=tuple(self._tests(context.test_results)),
+            tests=summarize_test_evidence(context.test_results),
             recovery=tuple(recovery_records),
             repair_attempts=repair_attempts,
             trace_event_count=len(trace.events) if trace is not None else 0,
@@ -74,6 +68,7 @@ class TaskResultAggregator:
         completion: CompletionDecision | None,
         trace: ExecutionTrace | None,
     ) -> TaskStatus:
+        """根据完成判定和 Trace 终止事件确定任务状态。"""
         if completion is not None:
             if completion.status is CompletionStatus.COMPLETE:
                 return TaskStatus.COMPLETED
@@ -96,6 +91,7 @@ class TaskResultAggregator:
         trace: ExecutionTrace | None,
         status: TaskStatus,
     ) -> str | None:
+        """提取任务未完成时可供用户处理的原因。"""
         if status is TaskStatus.COMPLETED:
             return None
         if completion is not None and completion.reason:
@@ -113,6 +109,7 @@ class TaskResultAggregator:
         completion: CompletionDecision | None,
         changes: ChangeSetSummary,
     ) -> str:
+        """生成不依赖模型自由文本的简短结果摘要。"""
         if completion is not None and completion.reason:
             return completion.reason
         if status is TaskStatus.COMPLETED:
@@ -120,33 +117,11 @@ class TaskResultAggregator:
         return "任务未完成，需根据停止原因继续处理。"
 
     @staticmethod
-    def _tests(results: Sequence[str]) -> list[TestEvidence]:
-        evidence: list[TestEvidence] = []
-        for raw in results:
-            if not isinstance(raw, str) or not raw.strip():
-                continue
-            target = _TEST_TARGET.search(raw)
-            exit_code = _TEST_EXIT.search(raw)
-            error = _TEST_ERROR.search(raw)
-            target_name = target.group(1).strip() if target else "未标识测试"
-            code = int(exit_code.group(1)) if exit_code else None
-            failed = code not in (None, 0) or "测试结果：失败" in raw or raw.startswith("错误：")
-            evidence.append(
-                TestEvidence(
-                    target=target_name,
-                    status=TestEvidenceStatus.FAILED if failed else TestEvidenceStatus.PASSED,
-                    exit_code=code,
-                    error_kind=error.group(1).strip() if error else None,
-                    output=raw,
-                )
-            )
-        return evidence
-
-    @staticmethod
     def _recovery_records(
         trace: ExecutionTrace | None,
         decision: RecoveryDecision | None,
     ) -> list[RecoveryRecord]:
+        """将恢复决策和 Trace 中的回滚事件转换为恢复记录。"""
         records: list[RecoveryRecord] = []
         if decision is not None:
             records.append(
@@ -180,6 +155,7 @@ class TaskResultAggregator:
 
     @staticmethod
     def _unresolved_paths(trace: ExecutionTrace | None) -> tuple[str, ...]:
+        """提取回滚后仍未恢复的工作区相对路径。"""
         if trace is None:
             return ()
         paths: list[str] = []
