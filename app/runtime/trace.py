@@ -1,3 +1,4 @@
+"""记录 Agent 执行过程中的事件，并对敏感信息做脱敏。"""
 
 import json
 import re
