@@ -36,6 +36,8 @@ SYSTEM_PROMPT = """
 5. 不要在未读取文件内容的情况下盲目修改已有文件。
 6. 修改或创建代码后，如果任务适合测试，应调用 run_tests。
 7. 如果测试失败，分析错误，修改代码，再次运行测试。
+   代码修改后的测试自动修复最多尝试两次；达到上限后请停止并说明原因。
+   优先运行用户明确指定的测试路径，指定测试通过后不要擅自扩大到整个项目。
 8. 根据工具实际返回的结果判断操作是否成功，不得编造执行结果。
 9. 如果工具返回错误，先分析错误原因，再决定下一步。
 10. 不要执行用户任务之外的操作，不要声称完成了实际没有完成的工作。
@@ -140,6 +142,7 @@ class Agent:
             )
 
         tool_call_count = 0
+        rollback_denied = False
 
         for step in range(1, self.max_steps + 1):
             print(f"\n[Agent] 第 {step}/{self.max_steps} 轮")
@@ -246,6 +249,14 @@ class Agent:
                             recoverable_paths=recovery.recoverable_paths,
                         )
                         if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
+                            if rollback_denied:
+                                reason = (
+                                    "用户拒绝回滚，当前修改已保留；"
+                                    "请确认是否继续执行后续修复。"
+                                )
+                                trace.record("user_confirmation_required", reason=reason)
+                                self._print_trace_summary(trace)
+                                return reason
                             trace.record(
                                 "rollback_authorization_requested",
                                 paths=recovery.recoverable_paths,
@@ -263,6 +274,40 @@ class Agent:
                             )
                             if rollback.status is not RollbackStatus.RESTORED:
                                 reason = f"恢复未完成：{rollback.reason}"
+                                if rollback.status is RollbackStatus.CANCELLED:
+                                    rollback_denied = True
+                                    self.last_recovery_decision = RecoveryDecision(
+                                        RecoveryAction.CONTINUE,
+                                        "用户拒绝回滚，保留现有修改并重新评估任务状态。",
+                                        recovery.triggers,
+                                        recovery.recoverable_paths,
+                                    )
+                                    messages.append(
+                                        {"role": "assistant", "content": answer}
+                                    )
+                                    messages.append(
+                                        {
+                                            "role": "system",
+                                            "content": (
+                                                "用户拒绝回滚，保留当前修改。请重新评估任务状态："
+                                                "如果已有足够证据则正常结束，否则继续修复或询问用户。"
+                                            ),
+                                        }
+                                    )
+                                    project_snapshot = ProjectExplorer(
+                                        self.workspace
+                                    ).explore()
+                                    decision = judge_task_complexity(
+                                        task, project_snapshot
+                                    )
+                                    self.last_plan = create_task_plan(
+                                        task, project_snapshot, decision
+                                    )
+                                    state_manager = PlanStateManager(self.last_plan)
+                                    self.last_context = ContextManager(
+                                        task, project_snapshot, self.last_plan
+                                    )
+                                    continue
                                 trace.record("task_stopped", reason=reason)
                                 self._print_trace_summary(trace)
                                 return reason
@@ -541,6 +586,14 @@ class Agent:
                 )
 
                 if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
+                    if rollback_denied:
+                        reason = (
+                            "用户拒绝回滚，当前修改已保留；"
+                            "请确认是否继续执行后续修复。"
+                        )
+                        trace.record("user_confirmation_required", reason=reason)
+                        self._print_trace_summary(trace)
+                        return reason
                     trace.record(
                         "rollback_authorization_requested",
                         paths=recovery.recoverable_paths,
@@ -558,6 +611,35 @@ class Agent:
                     )
                     if rollback.status is not RollbackStatus.RESTORED:
                         reason = f"恢复未完成：{rollback.reason}"
+                        if rollback.status is RollbackStatus.CANCELLED:
+                            rollback_denied = True
+                            self.last_recovery_decision = RecoveryDecision(
+                                RecoveryAction.CONTINUE,
+                                "用户拒绝回滚，保留现有修改并重新评估任务状态。",
+                                recovery.triggers,
+                                recovery.recoverable_paths,
+                            )
+                            messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "用户拒绝回滚，当前修改已保留。请重新评估任务状态，"
+                                        "继续执行、正常结束或明确询问用户。"
+                                    ),
+                                }
+                            )
+                            project_snapshot = ProjectExplorer(
+                                self.workspace
+                            ).explore()
+                            decision = judge_task_complexity(task, project_snapshot)
+                            self.last_plan = create_task_plan(
+                                task, project_snapshot, decision
+                            )
+                            state_manager = PlanStateManager(self.last_plan)
+                            self.last_context = ContextManager(
+                                task, project_snapshot, self.last_plan
+                            )
+                            break
                         trace.record("task_stopped", reason=reason)
                         self._print_trace_summary(trace)
                         return reason
