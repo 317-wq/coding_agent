@@ -96,12 +96,38 @@ class TaskPlanner:
 
     @staticmethod
     def _extract_objectives(task: str, complexity: TaskComplexity) -> list[str]:
-        separators = r"\s*(?:→|->|然后|并且|以及|同时|之后|再|并|;|；|\.|。)\s*"
-        parts = [part.strip(" ，,\t\n") for part in re.split(separators, task)]
-        parts = [part for part in parts if part]
+        # 计划按开发意图拆分，而不是按句号、编号或标题机械切片。
+        # 先移除常见列表标记，再只在相邻片段都包含行动意图时拆分。
+        normalized = re.sub(
+            r"(?m)^\s*(?:#{1,6}\s*|(?:\d+|[一二三四五六七八九十]+)[、.)）:]\s*)",
+            "",
+            task,
+        )
+        normalized = re.sub(
+            r"。(?=\s*(?:\d+|[一二三四五六七八九十]+)[、.)）:])",
+            "\n",
+            normalized,
+        )
+        action = r"(?:实现|新增|添加|创建|修改|更新|修复|删除|移除|重构|迁移|配置|编写|补充|测试|验证|运行|检查|读取|搜索|排查|支持|优化)"
+        clauses = [
+            part.strip(" ，,\t\n")
+            for part in re.split(r"\n+|；|;|(?:然后|之后|接着|再|并且|以及|同时)", normalized)
+        ]
+        parts: list[str] = []
+        for clause in clauses:
+            if not clause:
+                continue
+            # “修改代码并运行测试”是两个真实开发目标；普通句子中的“并”不拆。
+            pieces = re.split(r"\s+并(?=" + action + r")|并(?=" + action + r")", clause)
+            for piece in pieces:
+                piece = re.sub(r"^\s*(?:\d+|[一二三四五六七八九十]+)[、.)）:]\s*", "", piece)
+                piece = piece.strip(" ，,\t\n。.")
+                if piece and not re.fullmatch(r"[\d\W_]+", piece):
+                    parts.append(piece)
 
         if complexity is TaskComplexity.SIMPLE or len(parts) <= 1:
-            return [f"完成用户任务：{task}"]
+            cleaned = "；".join(parts) if parts else normalized.strip()
+            return [f"完成用户任务：{cleaned}"]
 
         return [f"完成：{part}" for part in parts]
 
