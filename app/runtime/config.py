@@ -1,3 +1,5 @@
+"""读取和校验 Agent 的运行时配置。"""
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
