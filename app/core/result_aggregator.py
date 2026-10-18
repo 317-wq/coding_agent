@@ -8,11 +8,8 @@ from app.core.change_summary import build_change_summary
 from app.core.completion import CompletionDecision, CompletionStatus
 from app.core.context import TaskContext
 from app.core.recovery import RecoveryDecision
-from app.core.task_result import (
-    RecoveryRecord,
-    TaskResult,
-    TaskStatus,
-)
+from app.core.recovery_summary import summarize_recovery
+from app.core.task_result import TaskResult, TaskStatus
 from app.core.test_evidence import summarize_test_evidence
 from app.runtime.trace import ExecutionTrace
 from app.tools.change_set import ChangeSetSummary
@@ -42,7 +39,7 @@ class TaskResultAggregator:
 
         status = task_status or self._status(completion, trace)
         stop_reason = self._stop_reason(completion, trace, status)
-        recovery_records = self._recovery_records(trace, recovery)
+        recovery_records = summarize_recovery(trace, recovery)
         # restored_paths 表示恢复过的路径，不是未恢复路径；只有回滚事件的
         # pending_paths 才进入 unresolved，见 _recovery_records。
         unresolved = self._unresolved_paths(trace)
@@ -53,7 +50,7 @@ class TaskResultAggregator:
             stop_reason=stop_reason,
             changes=build_change_summary(changes, unresolved),
             tests=summarize_test_evidence(context.test_results),
-            recovery=tuple(recovery_records),
+            recovery=recovery_records,
             repair_attempts=repair_attempts,
             trace_event_count=len(trace.events) if trace is not None else 0,
         )
@@ -110,43 +107,6 @@ class TaskResultAggregator:
         if status is TaskStatus.COMPLETED:
             return f"任务完成，产生 {len(changes.changes)} 个文件变更。"
         return "任务未完成，需根据停止原因继续处理。"
-
-    @staticmethod
-    def _recovery_records(
-        trace: ExecutionTrace | None,
-        decision: RecoveryDecision | None,
-    ) -> list[RecoveryRecord]:
-        """将恢复决策和 Trace 中的回滚事件转换为恢复记录。"""
-        records: list[RecoveryRecord] = []
-        if decision is not None:
-            records.append(
-                RecoveryRecord(
-                    action=decision.action.value,
-                    reason=decision.reason,
-                    restored_paths=decision.recoverable_paths,
-                )
-            )
-        if trace is None:
-            return records
-        for event in trace.events:
-            details = event.get("details", {})
-            if event["event"] == "recovery_decided":
-                records.append(
-                    RecoveryRecord(
-                        action=str(details.get("action", "unknown")),
-                        reason=str(details.get("reason", "恢复决策")),
-                        restored_paths=tuple(details.get("recoverable_paths", ())),
-                    )
-                )
-            elif event["event"] == "rollback_finished":
-                records.append(
-                    RecoveryRecord(
-                        action=f"rollback:{details.get('status', 'unknown')}",
-                        reason=str(details.get("reason", "回滚完成")),
-                        restored_paths=tuple(details.get("restored_paths", ())),
-                    )
-                )
-        return records
 
     @staticmethod
     def _unresolved_paths(trace: ExecutionTrace | None) -> tuple[str, ...]:
