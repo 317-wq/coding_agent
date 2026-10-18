@@ -3,7 +3,7 @@ import json
 
 from openai.types.chat import ChatCompletionMessageParam
 
-from app.completion import CompletionStatus, verify_completion
+from app.completion import CompletionStatus, CompletionVerifier, verify_completion
 from app.complexity import judge_task_complexity
 from app.context import ContextManager
 from app.explorer import ProjectExplorer
@@ -12,6 +12,7 @@ from app.model import ModelAdapter
 from app.planner import TaskPlan, create_task_plan
 from app.recovery import RecoveryAction, RecoveryDecision
 from app.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
+from app.requirements import TaskRequirementVerifier
 from app.result import ToolResult, ToolStatus
 from app.rollback import AuthorizedRollback, RollbackStatus
 from app.task_safety import TaskSafetySession
@@ -190,12 +191,18 @@ class Agent:
             # 没有工具调用，说明模型准备直接回复用户。
             if not message.tool_calls:
                 answer = message.content or "任务结束，但模型没有提供文字总结。"
-                if self.last_plan is not None and self.last_context is not None:
-                    decision = verify_completion(
-                        self.last_context.context.plan or self.last_plan,
-                        self.last_context.context.tool_results,
-                        self.last_context.context.test_results,
-                    )
+                if self.last_context is not None:
+                    if self.last_plan is not None:
+                        decision = verify_completion(
+                            self.last_context.context.plan or self.last_plan,
+                            self.last_context.context.tool_results,
+                            self.last_context.context.test_results,
+                        )
+                    else:
+                        decision = CompletionVerifier().verify_basic(
+                            self.last_context.context.tool_results,
+                            self.last_context.context.test_results,
+                        )
                     trace.record(
                         "completion_checked",
                         status=decision.status.value,
@@ -205,6 +212,28 @@ class Agent:
                         failed_step_ids=decision.failed_step_ids,
                         evidence=decision.evidence,
                     )
+                    requirement_check = TaskRequirementVerifier().verify(
+                        task, self.workspace
+                    )
+                    trace.record(
+                        "requirements_checked",
+                        passed=requirement_check.passed,
+                        missing=requirement_check.missing,
+                    )
+                    if not requirement_check.passed:
+                        messages.append(
+                            {"role": "assistant", "content": answer}
+                        )
+                        messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "最终代码尚未满足用户明确要求，请继续修正："
+                                    + "；".join(requirement_check.missing)
+                                ),
+                            }
+                        )
+                        continue
                     if decision.status is not CompletionStatus.COMPLETE:
                         recovery = safety.observe_completion(decision.status)
                         self.last_recovery_decision = recovery
@@ -236,7 +265,7 @@ class Agent:
                                 trace.record("task_stopped", reason=reason)
                                 self._print_trace_summary(trace)
                                 return reason
-                            safety.reset_after_recovery()
+                            safety.reset_after_recovery(rollback.status)
                             self.last_change_set = safety.change_set
                             project_snapshot = ProjectExplorer(
                                 self.workspace
@@ -407,6 +436,10 @@ class Agent:
                 if self.last_context is not None:
                     before_trim = self.last_context.context.truncated_count
                     self.last_context.add_tool_result(tool_result)
+                    if tool_name == "run_tests":
+                        self.last_context.add_test_result(
+                            tool_result.result or tool_result.error or "测试执行失败"
+                        )
                     if self.last_context.context.truncated_count > before_trim:
                         trace.record(
                             "context_trimmed",
@@ -528,7 +561,7 @@ class Agent:
                         self._print_trace_summary(trace)
                         return reason
 
-                    safety.reset_after_recovery()
+                    safety.reset_after_recovery(rollback.status)
                     self.last_change_set = safety.change_set
                     project_snapshot = ProjectExplorer(self.workspace).explore()
                     decision = judge_task_complexity(task, project_snapshot)
