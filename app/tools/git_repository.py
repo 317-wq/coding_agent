@@ -8,7 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
 
 GIT_TIMEOUT = 5
 
