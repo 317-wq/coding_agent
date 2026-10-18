@@ -31,12 +31,16 @@ class TaskSafetySession:
         self.consecutive_tool_failures = 0
         self.recovery_attempts = 0
         self.test_repair_attempts = 0
+        self.test_runs = 0
+        self.mutation_generation = 0
+        self.last_test_generation: int | None = None
 
     def prepare_tool(self, tool_name: str, arguments: dict[str, Any]) -> tuple[str, ...]:
         """在写入型工具执行前捕获所有可能受影响的普通文件。"""
 
         paths: list[str] = []
         if tool_name in FILE_MUTATION_TOOLS:
+            self.mutation_generation += 1
             path = arguments.get("path")
             if isinstance(path, str):
                 self.change_set.touch(path)
@@ -79,14 +83,24 @@ class TaskSafetySession:
         test_error_kind = None
         test_failed = False
         if tool_name == "run_tests" and result.status is ToolStatus.FAILURE:
+            self.test_runs += 1
             message = result.error or ""
             if "测试错误类型：收集冲突" in message:
                 test_error_kind = "collection"
             elif "测试错误类型：环境错误" in message:
                 test_error_kind = "environment"
+            elif "测试错误类型：测试代码" in message:
+                test_error_kind = "test_code"
             else:
                 test_failed = True
+            # 第一次运行测试只是建立基线，不算自动修复；只有修改后再次运行
+            # 才增加修复尝试次数。
+            if (
+                self.last_test_generation is not None
+                and self.mutation_generation > self.last_test_generation
+            ):
                 self.test_repair_attempts += 1
+            self.last_test_generation = self.mutation_generation
         return self.policy.decide(
             RecoverySignals(
                 consecutive_tool_failures=self.consecutive_tool_failures,
