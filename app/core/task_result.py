@@ -37,11 +37,13 @@ class ChangeSummary:
     unresolved: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        """校验变更路径均为非空字符串。"""
         for paths in (self.created, self.modified, self.deleted, self.unresolved):
             if any(not isinstance(path, str) or not path.strip() for path in paths):
                 raise ValueError("变更路径必须是非空字符串。")
 
     def to_dict(self) -> dict[str, list[str]]:
+        """返回稳定的字典结构，供 JSON 结果和报告使用。"""
         return {
             "created": list(self.created),
             "modified": list(self.modified),
@@ -61,12 +63,14 @@ class TestEvidence:
     output: str | None = None
 
     def __post_init__(self) -> None:
+        """校验测试目标和退出码字段格式。"""
         if not isinstance(self.target, str) or not self.target.strip():
             raise ValueError("测试目标不能为空。")
         if self.exit_code is not None and not isinstance(self.exit_code, int):
             raise TypeError("测试退出码必须是整数或 None。")
 
     def to_dict(self) -> dict[str, Any]:
+        """返回可序列化的测试证据字典。"""
         return {
             "target": self.target,
             "status": self.status.value,
@@ -86,10 +90,12 @@ class RecoveryRecord:
     restored_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        """校验恢复动作和原因均已提供。"""
         if not self.action.strip() or not self.reason.strip():
             raise ValueError("恢复动作和原因不能为空。")
 
     def to_dict(self) -> dict[str, Any]:
+        """返回可序列化的恢复记录字典。"""
         return {
             "action": self.action,
             "reason": self.reason,
@@ -113,6 +119,7 @@ class TaskResult:
     trace_event_count: int = 0
 
     def __post_init__(self) -> None:
+        """校验任务描述、修复次数和 Trace 计数合法。"""
         if not isinstance(self.task, str) or not self.task.strip():
             raise ValueError("任务描述不能为空。")
         if self.repair_attempts < 0:
@@ -127,6 +134,7 @@ class TaskResult:
         return self.status is TaskStatus.COMPLETED
 
     def to_dict(self) -> dict[str, Any]:
+        """返回完整任务结果的稳定字典表示。"""
         return {
             "task": self.task,
             "status": self.status.value,
