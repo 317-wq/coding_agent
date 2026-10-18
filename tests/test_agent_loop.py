@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 
-from app.agent import Agent
-from app.registry import ToolRegistry, ToolSpec
-from app.workspace import WorkspaceContext
+from app.core.agent import Agent
+from app.runtime.workspace import WorkspaceContext
+from app.tools.registry import ToolRegistry, ToolSpec
 
 PARAMETERS = {
     "type": "object",
@@ -49,7 +49,7 @@ def test_complex_task_uses_plan_and_verifies_before_finishing(monkeypatch, tmp_p
                 return _response(tool_calls=[_call(f"call-{self.calls}")])
             return _response(content="任务已完成")
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
     assert agent.run("读取配置，然后修改代码，然后运行测试") == "任务已完成"
