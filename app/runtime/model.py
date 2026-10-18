@@ -1,8 +1,9 @@
-from openai import OpenAI
-from openai.types.chat import ChatCompletion
-from openai.types.chat import ChatCompletionMessageParam
+"""封装模型客户端，提供统一的对话请求接口。"""
 
-from app.config import settings
+from openai import OpenAI
+from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+
+from app.runtime.config import settings
 
 
 class ModelAdapter:
