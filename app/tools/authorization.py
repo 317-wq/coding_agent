@@ -1,3 +1,5 @@
+"""高风险工具操作的授权策略与交互式授权器。"""
+
 import sys
 from dataclasses import dataclass
 from typing import Any, Protocol
