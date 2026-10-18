@@ -17,6 +17,10 @@ from app.tools.rollback import RollbackStatus
 FILE_MUTATION_TOOLS = {"create_file", "edit_file", "delete_file"}
 
 
+class TaskConstraintViolation(PermissionError):
+    """用户任务声明的操作约束被工具调用违反。"""
+
+
 class TaskSafetySession:
     """连接写入前快照、变更集与失败恢复策略。"""
 
@@ -24,8 +28,11 @@ class TaskSafetySession:
         self,
         workspace: WorkspaceContext,
         policy: RecoveryPolicy | None = None,
+        task: str = "",
     ) -> None:
         self.workspace = workspace
+        self.task = task
+        self.mutations_forbidden = self._detect_mutation_prohibition(task)
         self.policy = policy or RecoveryPolicy()
         self.change_set = TaskChangeSet(workspace)
         self.consecutive_tool_failures = 0
@@ -34,6 +41,28 @@ class TaskSafetySession:
         self.test_runs = 0
         self.mutation_generation = 0
         self.last_test_generation: int | None = None
+
+    @staticmethod
+    def _detect_mutation_prohibition(task: str) -> bool:
+        """识别用户明确禁止创建、修改或删除文件的任务约束。"""
+        lowered = task.lower().replace(" ", "")
+        markers = (
+            "禁止创建、修改、删除文件",
+            "禁止创建修改删除文件",
+            "不要创建、修改、删除文件",
+            "不要创建修改删除文件",
+            "不得创建、修改、删除文件",
+            "只读",
+            "仅允许读取",
+        )
+        return any(marker in lowered for marker in markers)
+
+    def validate_tool(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        """在执行工具前 enforcing 用户任务级安全约束。"""
+        if self.mutations_forbidden and tool_name in FILE_MUTATION_TOOLS | {"delete_directory"}:
+            raise TaskConstraintViolation(
+                "用户任务明确禁止创建、修改或删除文件，已拒绝该工具调用。"
+            )
 
     def prepare_tool(self, tool_name: str, arguments: dict[str, Any]) -> tuple[str, ...]:
         """在写入型工具执行前捕获所有可能受影响的普通文件。"""
