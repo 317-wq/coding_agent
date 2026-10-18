@@ -1,7 +1,9 @@
 from pathlib import Path
 
+from app.change_set import ChangeSetError
 from app.recovery import RecoveryAction
 from app.result import ToolResult
+from app.rollback import RollbackStatus
 from app.task_safety import TaskSafetySession
 from app.workspace import WorkspaceContext
 
@@ -53,7 +55,32 @@ def test_reset_after_recovery_starts_new_change_session(tmp_path: Path):
     session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
     session.prepare_tool("create_file", {"path": "new.py"})
 
-    session.reset_after_recovery()
+    session.reset_after_recovery(RollbackStatus.RESTORED)
 
     assert session.recovery_attempts == 1
     assert session.change_set.summary().touched_count == 0
+
+
+def test_reset_requires_successful_rollback(tmp_path: Path):
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+
+    try:
+        session.reset_after_recovery(RollbackStatus.CANCELLED)
+    except ValueError as exc:
+        assert "回滚成功" in str(exc)
+    else:
+        raise AssertionError("未成功回滚时不应重置变更会话")
+
+
+def test_observe_change_set_error_stops_safely(tmp_path: Path, monkeypatch):
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    monkeypatch.setattr(
+        session.change_set,
+        "summary",
+        lambda: (_ for _ in ()).throw(ChangeSetError("状态冲突")),
+    )
+
+    decision = session.observe("edit_file", ToolResult.failure("失败"))
+
+    assert decision.action is RecoveryAction.STOP
+    assert "状态冲突" in decision.reason
