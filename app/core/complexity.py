@@ -41,6 +41,11 @@ _COMPLEXITY_PATTERNS = (
     (re.compile(r"(?:所有|全部|整个项目|全局|批量|多个文件|多处)"), "影响范围较大"),
 )
 
+_VALIDATION_TASK_PATTERN = re.compile(
+    r"安全边界|完成状态|验收|越界|只尝试一次|仅验证|仅检查|验证是否|检查是否",
+    re.IGNORECASE,
+)
+
 
 class TaskComplexityJudge:
     """根据任务文本和项目快照做确定性的轻量判断。"""
@@ -61,6 +66,11 @@ class TaskComplexityJudge:
             raise ValueError("任务文本不能为空。")
 
         normalized = task.strip()
+        if _VALIDATION_TASK_PATTERN.search(normalized):
+            return ComplexityDecision(
+                complexity=TaskComplexity.SIMPLE,
+                reasons=("识别为一次性验收或安全边界检查，不生成通用开发计划。",),
+            )
         score = 0
         reasons: list[str] = []
 
