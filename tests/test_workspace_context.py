@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from app import tools
-from app.agent import Agent
-from app.workspace import WorkspaceContext
+from app.core.agent import Agent
+from app.runtime.workspace import WorkspaceContext
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +17,7 @@ def test_agent_shares_workspace_context_with_tools(monkeypatch, tmp_path: Path):
     marker = tmp_path / "selected-workspace.txt"
     marker.write_text("selected", encoding="utf-8")
     context = WorkspaceContext.from_path(tmp_path)
-    monkeypatch.setattr("app.agent.ModelAdapter", lambda: object())
+    monkeypatch.setattr("app.core.agent.ModelAdapter", lambda: object())
 
     agent = Agent(workspace=context)
 
