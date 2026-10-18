@@ -49,14 +49,6 @@ class TaskResultAggregator:
         status = task_status or self._status(completion, trace)
         stop_reason = self._stop_reason(completion, trace, status)
         recovery_records = self._recovery_records(trace, recovery)
-        unresolved = tuple(
-            dict.fromkeys(
-                path
-                for record in recovery_records
-                for path in record.restored_paths
-                if path
-            )
-        )
         # restored_paths 表示恢复过的路径，不是未恢复路径；只有回滚事件的
         # pending_paths 才进入 unresolved，见 _recovery_records。
         unresolved = self._unresolved_paths(trace)
@@ -87,6 +79,7 @@ class TaskResultAggregator:
                 return TaskStatus.COMPLETED
             if completion.status is CompletionStatus.BLOCKED:
                 return TaskStatus.BLOCKED
+            return TaskStatus.STOPPED
         if trace is not None:
             for event in reversed(trace.events):
                 if event["event"] == "task_failed":
