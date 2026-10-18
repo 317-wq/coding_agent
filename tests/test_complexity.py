@@ -2,18 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from app.complexity import (
+from app.core.complexity import (
     ComplexityDecision,
     TaskComplexity,
     TaskComplexityJudge,
     judge_task_complexity,
 )
-from app.explorer import ProjectExplorer
-from app.workspace import WorkspaceContext
+from app.runtime.explorer import ProjectExplorer
+from app.runtime.workspace import WorkspaceContext
 
 
 def test_simple_task_does_not_require_planning():
-    decision = judge_task_complexity("读取 app/config.py")
+    decision = judge_task_complexity("读取 app.runtime.config.py")
 
     assert isinstance(decision, ComplexityDecision)
     assert decision.complexity is TaskComplexity.SIMPLE
