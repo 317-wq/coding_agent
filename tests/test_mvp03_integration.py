@@ -2,14 +2,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.agent import Agent
-from app.completion import CompletionStatus, verify_completion
-from app.context import ContextManager
-from app.planner import create_task_plan
-from app.registry import ToolRegistry
-from app.result import ToolResult
-from app.task_state import PlanStateManager
-from app.workspace import WorkspaceContext
+from app.core.agent import Agent
+from app.core.completion import CompletionStatus, verify_completion
+from app.core.context import ContextManager
+from app.core.planner import create_task_plan
+from app.core.task_state import PlanStateManager
+from app.runtime.workspace import WorkspaceContext
+from app.tools.registry import ToolRegistry
+from app.tools.result import ToolResult
 
 
 def _answer(text="完成"):
@@ -27,7 +27,7 @@ def test_simple_task_keeps_direct_agent_path(monkeypatch, tmp_path):
         def chat(self, messages, tools):
             return _answer("直接完成")
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=ToolRegistry())
 
     assert agent.run("查看一个文件").startswith("已达到最大执行轮数")
