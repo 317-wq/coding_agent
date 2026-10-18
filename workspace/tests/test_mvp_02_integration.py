@@ -3,10 +3,10 @@ from pathlib import Path
 import pytest
 
 from app import main, tools
-from app.authorization import AuthorizationDecision
-from app.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
-from app.result import ToolStatus
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
+from app.tools.authorization import AuthorizationDecision
+from app.tools.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
+from app.tools.result import ToolStatus
 
 
 class DenyAuthorizer:
