@@ -1,9 +1,11 @@
+"""命令行交互入口，负责读取任务并启动 Agent。"""
+
 import argparse
 from pathlib import Path
 
 from app import tools
-from app.agent import Agent
-from app.workspace import WorkspaceContext
+from app.core.agent import Agent
+from app.runtime.workspace import WorkspaceContext
 
 
 def _read_task() -> str | None:
