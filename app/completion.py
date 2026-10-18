@@ -134,6 +134,54 @@ class CompletionVerifier:
             evidence=evidence,
         )
 
+    def verify_basic(
+        self,
+        tool_results: Sequence[ToolResult] = (),
+        test_results: Sequence[str] = (),
+    ) -> CompletionDecision:
+        """验证简单任务也具备结构化执行证据。"""
+
+        if any(not isinstance(item, ToolResult) for item in tool_results):
+            raise TypeError("工具结果必须是 ToolResult。")
+        failures = tuple(
+            item.error or item.result or "工具执行失败"
+            for item in tool_results
+            if item.status is ToolStatus.FAILURE
+        )
+        if failures:
+            return CompletionDecision(
+                CompletionStatus.BLOCKED,
+                "存在失败的工具结果。",
+                evidence=failures,
+            )
+        normalized_tests = tuple(item.strip() for item in test_results if item.strip())
+        failed_tests = tuple(
+            item for item in normalized_tests if self._FAILURE_PATTERN.search(item)
+        )
+        if failed_tests:
+            return CompletionDecision(
+                CompletionStatus.BLOCKED,
+                "测试结果包含失败或错误。",
+                evidence=failed_tests,
+            )
+        evidence = tuple(
+            (item.result or "工具执行成功")
+            for item in tool_results
+            if item.status in {ToolStatus.SUCCESS, ToolStatus.CANCELLED}
+        ) + tuple(
+            item for item in normalized_tests if self._SUCCESS_PATTERN.search(item)
+        )
+        if not evidence:
+            return CompletionDecision(
+                CompletionStatus.INCOMPLETE,
+                "缺少工具或测试的结构化完成证据。",
+            )
+        return CompletionDecision(
+            CompletionStatus.COMPLETE,
+            "存在结构化工具或测试完成证据。",
+            evidence=evidence,
+        )
+
 
 def verify_completion(
     plan: TaskPlan,
