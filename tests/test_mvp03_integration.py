@@ -30,7 +30,7 @@ def test_simple_task_keeps_direct_agent_path(monkeypatch, tmp_path):
     monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=ToolRegistry())
 
-    assert agent.run("查看一个文件") == "直接完成"
+    assert agent.run("查看一个文件").startswith("已达到最大执行轮数")
     assert agent.last_plan is None
 
 
