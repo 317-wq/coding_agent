@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 
 from app import tools
-from app.registry import ToolRegistry, ToolSpec
-from app.result import ToolStatus
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
+from app.tools.registry import ToolRegistry, ToolSpec
+from app.tools.result import ToolStatus
 
 
 @pytest.fixture(autouse=True)
