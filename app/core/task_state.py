@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any
 
-from app.planner import PlanStepStatus, TaskPlan
+from app.core.planner import PlanStepStatus, TaskPlan
 
 
 @dataclass(frozen=True)
