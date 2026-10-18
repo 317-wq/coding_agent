@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from app.authorization import (
+from app.tools.authorization import (
     AuthorizationDecision,
     ConsoleAuthorizer,
 )
-from app.registry import RiskLevel, ToolRegistry, ToolSpec
-from app.result import ToolStatus
+from app.tools.registry import RiskLevel, ToolRegistry, ToolSpec
+from app.tools.result import ToolStatus
 
 
 class StubAuthorizer:
