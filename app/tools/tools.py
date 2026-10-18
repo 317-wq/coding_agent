@@ -39,7 +39,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "列出工作目录中的文件和目录。",
+            "description": "列出工作目录中的文件和目录。path 必须使用工作区相对路径，根目录使用 '.'。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -191,8 +191,18 @@ def set_workspace(context: WorkspaceContext) -> None:
 
 
 def _resolve_path(path: str) -> Path:
-    """解析路径，并拒绝访问工作目录之外的位置。"""
+    """解析工作区相对路径；允许模型传入当前工作区的绝对路径并归一化。"""
 
+    candidate = Path(path).expanduser()
+    if candidate.is_absolute():
+        root = WORKSPACE_CONTEXT.root.resolve()
+        resolved = candidate.resolve()
+        if resolved == root:
+            path = "."
+        elif root in resolved.parents:
+            path = resolved.relative_to(root).as_posix()
+        else:
+            raise ValueError("禁止访问工作目录之外的路径。")
     return WORKSPACE_CONTEXT.resolve(path)
 
 
