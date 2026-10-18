@@ -94,7 +94,9 @@ def test_agent_rolls_back_and_replans_after_failed_mutation(
     assert authorizer.calls[0][0] == "rollback_task_changes"
 
 
-def test_agent_stops_when_rollback_is_denied(monkeypatch, tmp_path: Path):
+def test_agent_preserves_changes_and_requests_confirmation_when_rollback_is_denied(
+    monkeypatch, tmp_path: Path
+):
     target = tmp_path / "module.py"
     target.write_text("original", encoding="utf-8")
     authorizer = StubAuthorizer(AuthorizationDecision.deny("用户拒绝"))
@@ -111,6 +113,7 @@ def test_agent_stops_when_rollback_is_denied(monkeypatch, tmp_path: Path):
 
     result = agent.run("读取配置，然后修改代码，然后运行测试")
 
-    assert result.startswith("恢复未完成：回滚未获授权")
+    assert "用户拒绝回滚" in result
+    assert "请确认" in result
     assert target.read_text(encoding="utf-8") == "broken"
     assert agent.last_recovery_decision.action is RecoveryAction.SUGGEST_ROLLBACK
