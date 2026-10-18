@@ -27,6 +27,7 @@ SYSTEM_PROMPT = """
 
 你的受控工作区是：{workspace}
 所有文件路径都必须相对于该工作区，并通过提供的工具操作。
+路径参数优先使用工作区相对路径，例如 `src/calculator.py` 或 `.`；不要把工作区绝对路径传给工具。
 
 工作规则：
 1. 先查看工作区，了解现有目录和文件，不要假设文件内容。
@@ -500,7 +501,12 @@ class Agent:
                             current = pending
                     if current is not None:
                         if tool_result.status is ToolStatus.SUCCESS:
-                            state_manager.complete_step(current, tool_result.result)
+                            if state_manager.can_complete_step(
+                                current, tool_name, arguments, tool_result
+                            ):
+                                state_manager.complete_step(current, tool_result.result)
+                            # 工具成功但未满足当前步骤条件时，保留 running 状态，
+                            # 等待匹配的工具结果，不能误标记为失败。
                         elif tool_result.status is ToolStatus.CANCELLED:
                             state_manager.cancel_step(
                                 current, tool_result.result or "工具已取消"
