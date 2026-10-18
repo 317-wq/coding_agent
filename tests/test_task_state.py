@@ -21,6 +21,17 @@ def test_initial_state_is_pending_and_serializable(manager):
     assert json.loads(state.to_json()) == state.to_dict()
 
 
+def test_match_step_uses_test_path_instead_of_step_order():
+    manager = PlanStateManager(
+        create_task_plan("阅读代码，然后实现功能，然后编写测试，然后运行测试")
+    )
+
+    step_id = manager.match_step("create_file", {"path": "tests/test_calculator.py"})
+
+    assert step_id is not None
+    assert "测试" in manager.state().plan.steps[step_id - 1].objective
+
+
 def test_step_can_start_and_complete_without_mutating_old_plan(manager):
     original = manager.state().plan
     manager.start_step(1)
