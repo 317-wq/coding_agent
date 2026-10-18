@@ -51,6 +51,31 @@ def test_hard_failure_with_changes_suggests_rollback_and_serializes():
     assert decision.action is RecoveryAction.SUGGEST_ROLLBACK
     assert decision.recoverable_paths == ("app/main.py", "tests/test_main.py")
     assert decision.triggers == ("测试失败", "计划失败")
+
+
+def test_test_repair_attempt_limit_stops_automatic_recovery():
+    decision = decide_recovery(
+        RecoverySignals(
+            test_failed=True,
+            test_repair_attempts=2,
+            recoverable_paths=("app/main.py",),
+        )
+    )
+
+    assert decision.action is RecoveryAction.STOP
+    assert "上限" in decision.reason
+
+
+def test_collection_error_does_not_suggest_rollback():
+    decision = decide_recovery(
+        RecoverySignals(
+            test_error_kind="collection",
+            recoverable_paths=("app/main.py",),
+        )
+    )
+
+    assert decision.action is RecoveryAction.STOP
+    assert "环境" in decision.reason
     assert json.loads(decision.to_json()) == decision.to_dict()
 
 
