@@ -2,10 +2,16 @@
 
 from typing import Any
 
-from app.change_set import TaskChangeSet
+from app.change_set import ChangeSetError, TaskChangeSet
 from app.completion import CompletionStatus
-from app.recovery import RecoveryDecision, RecoveryPolicy, RecoverySignals
+from app.recovery import (
+    RecoveryAction,
+    RecoveryDecision,
+    RecoveryPolicy,
+    RecoverySignals,
+)
 from app.result import ToolResult, ToolStatus
+from app.rollback import RollbackStatus
 from app.workspace import WorkspaceContext
 
 FILE_MUTATION_TOOLS = {"create_file", "edit_file", "delete_file"}
@@ -60,7 +66,14 @@ class TaskSafetySession:
         elif result.status is ToolStatus.SUCCESS:
             self.consecutive_tool_failures = 0
 
-        summary = self.change_set.summary()
+        try:
+            summary = self.change_set.summary()
+        except ChangeSetError as exc:
+            return RecoveryDecision(
+                action=RecoveryAction.STOP,
+                reason=f"无法安全分析任务变更：{exc}",
+                triggers=("变更集异常",),
+            )
         recoverable_paths = tuple(change.path for change in summary.changes)
         return self.policy.decide(
             RecoverySignals(
@@ -78,7 +91,14 @@ class TaskSafetySession:
     def observe_completion(
         self, status: CompletionStatus
     ) -> RecoveryDecision:
-        summary = self.change_set.summary()
+        try:
+            summary = self.change_set.summary()
+        except ChangeSetError as exc:
+            return RecoveryDecision(
+                action=RecoveryAction.STOP,
+                reason=f"无法安全分析任务变更：{exc}",
+                triggers=("变更集异常",),
+            )
         return self.policy.decide(
             RecoverySignals(
                 completion_status=status,
@@ -89,7 +109,9 @@ class TaskSafetySession:
             )
         )
 
-    def reset_after_recovery(self) -> None:
+    def reset_after_recovery(self, rollback_status: RollbackStatus) -> None:
+        if rollback_status is not RollbackStatus.RESTORED:
+            raise ValueError("只有确认回滚成功后才能重置任务变更会话。")
         self.recovery_attempts += 1
         self.consecutive_tool_failures = 0
         self.change_set = TaskChangeSet(self.workspace)
