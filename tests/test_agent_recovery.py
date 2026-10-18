@@ -1,12 +1,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.agent import Agent
-from app.authorization import AuthorizationDecision
-from app.recovery import RecoveryAction
-from app.registry import ToolRegistry, ToolSpec
-from app.result import ToolResult
-from app.workspace import WorkspaceContext
+from app.core.agent import Agent
+from app.core.recovery import RecoveryAction
+from app.runtime.workspace import WorkspaceContext
+from app.tools.authorization import AuthorizationDecision
+from app.tools.registry import ToolRegistry, ToolSpec
+from app.tools.result import ToolResult
 
 EMPTY_PARAMETERS = {
     "type": "object",
@@ -81,7 +81,7 @@ def test_agent_rolls_back_and_replans_after_failed_mutation(
             assert "已授权回滚" in str(messages)
             return _response(content="恢复后完成")
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
     result = agent.run("读取配置，然后修改代码，然后运行测试")
@@ -106,7 +106,7 @@ def test_agent_stops_when_rollback_is_denied(monkeypatch, tmp_path: Path):
                 tool_calls=[_call("edit_file", "edit", '{"path":"module.py"}')]
             )
 
-    monkeypatch.setattr("app.agent.ModelAdapter", FakeModel)
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
     result = agent.run("读取配置，然后修改代码，然后运行测试")
