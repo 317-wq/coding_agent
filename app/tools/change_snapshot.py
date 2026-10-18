@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.workspace import WorkspaceContext
+from app.runtime.workspace import WorkspaceContext
 
 MAX_SNAPSHOT_FILE_SIZE = 1024 * 1024
 MAX_SNAPSHOT_FILES = 100
