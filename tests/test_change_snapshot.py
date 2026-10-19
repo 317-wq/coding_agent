@@ -38,6 +38,19 @@ def test_repeated_capture_keeps_first_state(tmp_path: Path):
     assert len(store.snapshots) == 1
 
 
+def test_workspace_absolute_path_uses_same_snapshot_key(tmp_path: Path):
+    """验证工作区内绝对路径与相对路径使用同一个规范快照键。"""
+    target = tmp_path / "module.py"
+    target.write_text("first", encoding="utf-8")
+    store = TaskSnapshotStore(WorkspaceContext.from_path(tmp_path))
+
+    first = store.capture(str(target))
+    second = store.capture("module.py")
+
+    assert second is first
+    assert first.path == "module.py"
+
+
 def test_captures_originally_missing_path(tmp_path: Path):
     store = TaskSnapshotStore(WorkspaceContext.from_path(tmp_path))
 
@@ -59,9 +72,7 @@ def test_binary_content_is_preserved_as_bytes(tmp_path: Path):
 def test_rejects_oversized_directory_outside_and_symlink_paths(tmp_path: Path):
     (tmp_path / "large.txt").write_bytes(b"12345")
     (tmp_path / "folder").mkdir()
-    store = TaskSnapshotStore(
-        WorkspaceContext.from_path(tmp_path), max_file_size=4
-    )
+    store = TaskSnapshotStore(WorkspaceContext.from_path(tmp_path), max_file_size=4)
 
     with pytest.raises(SnapshotError, match="单文件快照上限"):
         store.capture("large.txt")
@@ -88,9 +99,7 @@ def test_enforces_file_count_and_total_size_limits(tmp_path: Path):
     with pytest.raises(SnapshotError, match="总大小"):
         store.capture("two.txt")
 
-    count_limited = TaskSnapshotStore(
-        WorkspaceContext.from_path(tmp_path), max_files=1
-    )
+    count_limited = TaskSnapshotStore(WorkspaceContext.from_path(tmp_path), max_files=1)
     count_limited.capture("one.txt")
     with pytest.raises(SnapshotError, match="数量"):
         count_limited.capture("missing.txt")
