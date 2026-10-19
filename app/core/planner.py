@@ -143,12 +143,13 @@ class TaskPlanner:
             if re.search(r"实现|新增|添加|创建|修改|更新|修复|重构|优化", normalized):
                 objectives.append("实现或修改任务要求的功能")
             if re.search(
-                r"(?:编写|补充|新增|添加|创建|修改).{0,8}(?:测试|用例|断言)",
+                r"(?:编写|补充|新增|添加|创建|修改)\s*"
+                r"(?:对应|相关|新的|现有)?\s*(?:测试|用例|断言)",
                 actionable_test_text,
             ):
                 objectives.append("编写或补充测试用例")
             if re.search(
-                r"运行.{0,8}测试|执行.{0,8}测试|回归测试|完整测试|测试通过|验证",
+                r"运行.{0,8}测试|执行.{0,8}测试|重跑.{0,8}测试|回归测试|完整测试|测试通过|验证",
                 normalized,
             ):
                 objectives.append("运行指定测试并记录结果")
