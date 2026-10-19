@@ -66,7 +66,8 @@ def test_test_repair_attempt_limit_requests_rollback_decision():
     assert "上限" in decision.reason
 
 
-def test_collection_error_does_not_suggest_rollback():
+def test_collection_error_replans_for_code_repair():
+    """验证测试收集失败会进入代码分析修复，而不是立即停止。"""
     decision = decide_recovery(
         RecoverySignals(
             test_error_kind="collection",
@@ -74,9 +75,35 @@ def test_collection_error_does_not_suggest_rollback():
         )
     )
 
+    assert decision.action is RecoveryAction.REPLAN
+    assert "收集失败" in decision.reason
+    assert json.loads(decision.to_json()) == decision.to_dict()
+
+
+def test_code_import_error_replans_until_repair_limit():
+    """验证循环导入类错误允许两轮修改，达到上限后才建议回滚。"""
+    first = decide_recovery(
+        RecoverySignals(test_error_kind="import", test_repair_attempts=0)
+    )
+    exhausted = decide_recovery(
+        RecoverySignals(
+            test_error_kind="import",
+            test_repair_attempts=2,
+            recoverable_paths=("calculator.py",),
+        )
+    )
+
+    assert first.action is RecoveryAction.REPLAN
+    assert "项目代码导入失败" in first.reason
+    assert exhausted.action is RecoveryAction.SUGGEST_ROLLBACK
+
+
+def test_environment_error_still_stops_without_code_changes():
+    """验证真实测试环境错误不会误导 Agent 修改业务代码。"""
+    decision = decide_recovery(RecoverySignals(test_error_kind="environment"))
+
     assert decision.action is RecoveryAction.STOP
     assert "环境" in decision.reason
-    assert json.loads(decision.to_json()) == decision.to_dict()
 
 
 def test_blocked_completion_without_changes_stops():
