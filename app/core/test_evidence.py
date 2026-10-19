@@ -42,9 +42,14 @@ class TestEvidenceSummarizer:
             or "测试结果：失败" in raw
             or raw.startswith("错误：")
         )
+        passed = exit_code == 0 or "测试结果：通过" in raw
         return TestEvidence(
             target=target,
-            status=TestEvidenceStatus.FAILED if failed else TestEvidenceStatus.PASSED,
+            status=(
+                TestEvidenceStatus.PASSED
+                if passed and not failed
+                else TestEvidenceStatus.FAILED
+            ),
             exit_code=exit_code,
             error_kind=error_match.group(1).strip() if error_match else None,
             output=raw,
@@ -57,3 +62,34 @@ def summarize_test_evidence(
 ) -> tuple[TestEvidence, ...]:
     """使用默认摘要器生成测试证据。"""
     return TestEvidenceSummarizer().summarize(results, requested_targets)
+
+
+def test_target_covers(parent: str, child: str) -> bool:
+    """判断父级 pytest 目标的成功结果是否覆盖某个子目标。"""
+    parent = parent.strip().replace("\\", "/").rstrip("/") or "."
+    child = child.strip().replace("\\", "/").rstrip("/") or "."
+    if parent == ".":
+        return True
+    parent_path, separator, _ = parent.partition("::")
+    child_path, _, _ = child.partition("::")
+    if separator:
+        return child == parent or child.startswith(f"{parent}::")
+    if parent_path.endswith(".py"):
+        return child_path == parent_path
+    return child_path == parent_path or child_path.startswith(f"{parent_path}/")
+
+
+def latest_test_evidence(
+    evidence: Sequence[TestEvidence],
+) -> tuple[TestEvidence, ...]:
+    """折叠测试历史，使成功父目标覆盖此前的子目标失败。"""
+    latest: dict[str, TestEvidence] = {}
+    for item in evidence:
+        if item.status is TestEvidenceStatus.PASSED:
+            latest = {
+                target: previous
+                for target, previous in latest.items()
+                if not test_target_covers(item.target, target)
+            }
+        latest[item.target] = item
+    return tuple(latest.values())
