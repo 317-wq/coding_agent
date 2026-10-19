@@ -72,7 +72,8 @@ def test_only_successful_test_text_counts_as_test_evidence():
     assert decision.status is CompletionStatus.INCOMPLETE
 
 
-def test_target_test_evidence_can_complete_stale_pending_plan():
+def test_target_test_evidence_cannot_complete_pending_plan():
+    """验证测试通过不能覆盖仍未完成的必要计划步骤。"""
     plan = create_task_plan("修改代码")
     decision = verify_completion(
         plan,
@@ -80,5 +81,28 @@ def test_target_test_evidence_can_complete_stale_pending_plan():
         ["测试目标：tests/test_calculator.py\n测试结果：通过"],
     )
 
-    assert decision.status is CompletionStatus.COMPLETE
+    assert decision.status is CompletionStatus.INCOMPLETE
+    assert decision.completed is False
     assert decision.pending_step_ids == (1,)
+
+
+def test_failed_tool_preserves_all_pending_steps_in_blocked_decision():
+    """验证工具失败时返回 blocked，并保留全部待处理步骤。"""
+    plan = create_task_plan("读取配置，然后修改代码，然后运行测试")
+    decision = verify_completion(plan, [ToolResult.failure("读取失败")])
+
+    assert decision.status is CompletionStatus.BLOCKED
+    assert decision.completed is False
+    assert decision.pending_step_ids == (1, 2, 3)
+    assert decision.evidence == ("读取失败",)
+
+
+def test_cancelled_tool_is_not_success_evidence_for_simple_task():
+    """验证被取消的工具调用不能让简单任务判定完成。"""
+    from app.core.completion import CompletionVerifier
+
+    decision = CompletionVerifier().verify_basic(
+        [ToolResult.cancelled("用户取消")]
+    )
+    assert decision.status is CompletionStatus.BLOCKED
+    assert decision.completed is False
