@@ -120,3 +120,18 @@ def test_latest_result_for_same_test_target_supersedes_old_failure():
     )
 
     assert decision.status is CompletionStatus.COMPLETE
+
+
+def test_passing_parent_target_supersedes_failed_child_target():
+    """验证完整文件通过可覆盖该文件内子用例的历史失败。"""
+    from app.core.completion import CompletionVerifier
+
+    decision = CompletionVerifier().verify_basic(
+        test_results=(
+            "测试目标：tests/test_app.py::TestApp::test_one\n"
+            "测试退出码：1\n测试结果：失败",
+            "测试目标：tests/test_app.py\n测试退出码：0\n测试结果：通过",
+        )
+    )
+
+    assert decision.status is CompletionStatus.COMPLETE
