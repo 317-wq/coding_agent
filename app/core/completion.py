@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Any
 
 from app.core.planner import PlanStepStatus, TaskPlan
+from app.core.test_evidence import test_target_covers
 from app.tools.result import ToolResult, ToolStatus
 
 
@@ -60,7 +61,7 @@ class CompletionVerifier:
 
     @classmethod
     def _latest_test_results(cls, test_results: Sequence[str]) -> tuple[str, ...]:
-        """按测试目标保留最新结果，允许修复后的成功覆盖旧失败。"""
+        """保留最新结果，并允许成功的父目标覆盖历史子目标失败。"""
         latest: dict[str, str] = {}
         unkeyed: list[str] = []
         for raw in test_results:
@@ -71,8 +72,20 @@ class CompletionVerifier:
             if match is None:
                 unkeyed.append(normalized)
                 continue
-            latest[match.group(1).strip()] = normalized
+            target = match.group(1).strip()
+            if cls._is_successful_test_result(normalized):
+                latest = {
+                    old_target: old_result
+                    for old_target, old_result in latest.items()
+                    if not test_target_covers(target, old_target)
+                }
+            latest[target] = normalized
         return (*unkeyed, *latest.values())
+
+    @classmethod
+    def _is_successful_test_result(cls, raw: str) -> bool:
+        """判断测试文本是否明确表示成功，而非依赖模糊关键词。"""
+        return "测试退出码：0" in raw and "测试结果：通过" in raw
 
     def verify(
         self,
