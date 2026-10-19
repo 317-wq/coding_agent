@@ -30,6 +30,7 @@ def test_reports_created_modified_deleted_and_unchanged_files(tmp_path: Path):
 
 
 def test_summary_recomputes_current_state(tmp_path: Path):
+    """验证恢复原内容后只保留触碰记录，不再报告净变化。"""
     target = tmp_path / "module.py"
     target.write_text("before", encoding="utf-8")
     changes = TaskChangeSet(WorkspaceContext.from_path(tmp_path))
@@ -39,8 +40,14 @@ def test_summary_recomputes_current_state(tmp_path: Path):
     assert changes.summary().modified_paths == ("module.py",)
     target.write_text("before", encoding="utf-8")
     summary = changes.summary()
+    payload = summary.to_dict()
     assert summary.changes == ()
+    assert summary.net_changed_count == 0
     assert summary.unchanged_count == 1
+    assert payload["comparison_basis"] == "task_initial_state"
+    assert payload["changed_count"] == 0
+    assert payload["net_changed_count"] == 0
+    assert payload["modified_paths"] == []
 
 
 def test_permission_only_change_is_modified(tmp_path: Path):
@@ -83,9 +90,7 @@ def test_rejects_workspace_mismatch_and_unsafe_current_state(tmp_path: Path):
 
 
 def test_rejects_current_file_over_size_limit(tmp_path: Path):
-    store = TaskSnapshotStore(
-        WorkspaceContext.from_path(tmp_path), max_file_size=4
-    )
+    store = TaskSnapshotStore(WorkspaceContext.from_path(tmp_path), max_file_size=4)
     changes = TaskChangeSet(WorkspaceContext.from_path(tmp_path), store)
     changes.touch("new.txt")
     (tmp_path / "new.txt").write_bytes(b"12345")
