@@ -995,8 +995,11 @@ class Agent:
                     replacement_plan = create_task_plan(
                         task, project_snapshot, decision
                     )
-                    self.last_plan = carry_completed_steps(
-                        self.last_plan, replacement_plan
+                    prior_plan = self.last_plan
+                    self.last_plan = (
+                        replacement_plan
+                        if prior_plan is None
+                        else carry_completed_steps(prior_plan, replacement_plan)
                     )
                     state_manager = PlanStateManager(self.last_plan)
                     self.last_context.begin_replan(self.last_plan)
