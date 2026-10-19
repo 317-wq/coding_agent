@@ -67,6 +67,10 @@ class PlanStateManager:
     def match_step(self, tool_name: str, arguments: dict[str, Any]) -> int | None:
         """根据工具能力和目标路径选择匹配的 pending 步骤。"""
 
+        # 建目录只是后续写文件的前置条件，不能单独证明功能或测试已经完成。
+        if tool_name == "create_directory":
+            return None
+
         path = str(arguments.get("path", "")).lower()
         objective_scores: list[tuple[int, int]] = []
         for step in self._plan.steps:
@@ -78,10 +82,13 @@ class PlanStateManager:
                 word in text for word in ("阅读", "读取", "项目结构", "搜索")
             ):
                 score += 4
-            if tool_name in {"create_file", "edit_file", "create_directory", "delete_file", "delete_directory"}:
+            if tool_name in {"create_file", "edit_file", "delete_file", "delete_directory"}:
                 if path.startswith("tests/") or "/tests/" in path:
                     score += 5 if "测试" in text else 0
-                score += 4 if any(word in text for word in ("实现", "修改", "功能")) else 0
+                score += 4 if any(
+                    word in text
+                    for word in ("实现", "修改", "修复", "创建", "新增", "功能")
+                ) else 0
             if tool_name == "run_tests":
                 score += 6 if "运行" in text or "验证" in text else 0
             if tool_name not in {"run_tests", "list_files", "read_file", "search_code", "create_file", "edit_file", "create_directory", "delete_file", "delete_directory"}:
@@ -91,7 +98,7 @@ class PlanStateManager:
             return None
         # 分数相同时保留更早的步骤，避免后面的无关步骤抢占当前工具结果。
         best_score, best_id = max(objective_scores, key=lambda item: (item[0], -item[1]))
-        return best_id if best_score > 0 else min(step_id for _, step_id in objective_scores)
+        return best_id if best_score > 0 else None
 
     def can_complete_step(
         self, step_id: int, tool_name: str, arguments: dict[str, Any], result: Any
@@ -118,8 +125,8 @@ class PlanStateManager:
             )
         if "运行" in text or "验证" in text:
             return tool_name == "run_tests"
-        if "实现" in text or "修改" in text or "功能" in text:
-            return tool_name in {"create_file", "edit_file", "create_directory"} and not (
+        if any(word in text for word in ("实现", "修改", "修复", "创建", "新增", "功能")):
+            return tool_name in {"create_file", "edit_file"} and not (
                 path.startswith("tests/") or "/tests/" in path
             )
         return tool_name in {"create_file", "edit_file", "run_tests"}
