@@ -2,7 +2,7 @@
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
@@ -181,3 +181,19 @@ def create_task_plan(
     """使用默认 Planner 创建任务计划。"""
 
     return TaskPlanner().plan(task, snapshot, decision)
+
+
+def carry_completed_steps(previous: TaskPlan, replacement: TaskPlan) -> TaskPlan:
+    """在同一任务重规划时继承目标和完成条件一致的已完成步骤。"""
+    completed = {
+        (step.objective, step.completion_criteria)
+        for step in previous.steps
+        if step.status is PlanStepStatus.COMPLETED
+    }
+    steps = tuple(
+        replace(step, status=PlanStepStatus.COMPLETED)
+        if (step.objective, step.completion_criteria) in completed
+        else step
+        for step in replacement.steps
+    )
+    return replace(replacement, steps=steps)
