@@ -11,6 +11,7 @@ from app.core.recovery import (
     RecoveryPolicy,
     RecoverySignals,
 )
+from app.core.task_intent import is_validation_only_task
 from app.core.test_evidence import test_target_covers
 from app.runtime.workspace import WorkspaceContext
 from app.tools.change_set import ChangeSetError, TaskChangeSet
@@ -71,18 +72,7 @@ class TaskSafetySession:
     @staticmethod
     def _detect_validation_task(task: str) -> bool:
         """识别只需验证一次结果、失败后不应继续探索的任务。"""
-        markers = (
-            "安全边界",
-            "完成状态",
-            "验收",
-            "越界",
-            "只尝试一次",
-            "仅验证",
-            "仅检查",
-            "验证是否",
-            "检查是否",
-        )
-        return any(marker in task for marker in markers)
+        return is_validation_only_task(task)
 
     def validate_tool(self, tool_name: str, arguments: dict[str, Any]) -> None:
         """在执行工具前 enforcing 用户任务级安全约束。"""
@@ -156,6 +146,16 @@ class TaskSafetySession:
             f"最新回归测试仍然失败（{details}），任务未完成；"
             "已保留当前有效代码修改和完整测试证据。"
         )
+
+    def pending_test_rerun_target(self) -> str | None:
+        """返回已有实际修改但尚未重跑验证的失败测试目标。"""
+        if (
+            self.last_failed_test_key is None
+            or self.last_failed_test_generation is None
+            or self.mutation_generation <= self.last_failed_test_generation
+        ):
+            return None
+        return self._test_target_from_key(self.last_failed_test_key)
 
     def completed_mutation(
         self, tool_name: str, arguments: dict[str, Any]
