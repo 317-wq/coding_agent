@@ -44,6 +44,23 @@ class TaskReportRenderer:
                 lines.append(f"  - {evidence.target}：{status}（{details}）")
         else:
             lines.append("  - 无测试证据")
+        verification = result.final_verification
+        lines.extend(
+            (
+                "最终状态核验：",
+                f"  - 结果：{'通过' if verification.verified else '未通过'}",
+                (
+                    "  - 文件：按任务初始状态核验 "
+                    f"{verification.verified_path_count} 个路径，"
+                    f"当前净变化 {verification.net_changed_count} 个"
+                ),
+                (
+                    f"  - Git：{verification.git_status}，"
+                    f"变更 {verification.git_changed_count if verification.git_changed_count is not None else '未知'} 个"
+                ),
+                f"  - 测试证据：{verification.test_evidence_count} 条",
+            )
+        )
         lines.append(RecoverySummaryBuilder.render(result.recovery, result.repair_attempts))
         if result.stop_reason:
             lines.append(f"未完成原因：{result.stop_reason}")
@@ -58,6 +75,14 @@ class TaskReportRenderer:
             )
         else:
             lines.append("  - 无关键 Trace 引用")
+        calls = result.tool_calls
+        lines.append(
+            "执行统计："
+            f"模型请求 {result.model_request_count} 次；"
+            f"工具调用开始 {calls.calls_started} 次、完成 {calls.calls_finished} 次，"
+            f"成功 {calls.succeeded} 次、失败 {calls.failed} 次、"
+            f"取消 {calls.cancelled} 次、未完成 {calls.unfinished} 次"
+        )
         lines.append(f"Trace 事件：{result.trace_event_count}")
         return "\n".join(lines)
 
