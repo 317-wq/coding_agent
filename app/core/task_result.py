@@ -107,6 +107,78 @@ class RecoveryRecord:
 
 
 @dataclass(frozen=True)
+class ToolCallSummary:
+    """直接来自 Trace 的工具调用计数。"""
+
+    calls_started: int = 0
+    calls_finished: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    cancelled: int = 0
+    unfinished: int = 0
+
+    def __post_init__(self) -> None:
+        """校验全部调用计数都是非负整数。"""
+        values = self.to_dict().values()
+        if any(not isinstance(value, int) or value < 0 for value in values):
+            raise ValueError("工具调用计数必须是非负整数。")
+
+    def to_dict(self) -> dict[str, int]:
+        """返回与 Trace 统计字段一致的字典。"""
+        return {
+            "calls_started": self.calls_started,
+            "calls_finished": self.calls_finished,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "cancelled": self.cancelled,
+            "unfinished": self.unfinished,
+        }
+
+
+@dataclass(frozen=True)
+class FinalVerificationSummary:
+    """任务结束前从磁盘、Git、测试和 Trace 重新取得的证据摘要。"""
+
+    verified: bool = False
+    comparison_basis: str = "task_initial_state"
+    verified_path_count: int = 0
+    net_changed_count: int = 0
+    git_status: str = "not_checked"
+    git_dirty: bool | None = None
+    git_changed_count: int | None = None
+    test_evidence_count: int = 0
+    evidence_sources: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """校验核验计数、比较口径和证据来源。"""
+        if self.comparison_basis != "task_initial_state":
+            raise ValueError("最终文件核验必须相对任务初始状态。")
+        counts = (
+            self.verified_path_count,
+            self.net_changed_count,
+            self.test_evidence_count,
+        )
+        if any(not isinstance(value, int) or value < 0 for value in counts):
+            raise ValueError("最终核验计数必须是非负整数。")
+        if self.git_changed_count is not None and self.git_changed_count < 0:
+            raise ValueError("Git 变更计数不能小于 0。")
+
+    def to_dict(self) -> dict[str, Any]:
+        """返回最终核验证据的稳定字典。"""
+        return {
+            "verified": self.verified,
+            "comparison_basis": self.comparison_basis,
+            "verified_path_count": self.verified_path_count,
+            "net_changed_count": self.net_changed_count,
+            "git_status": self.git_status,
+            "git_dirty": self.git_dirty,
+            "git_changed_count": self.git_changed_count,
+            "test_evidence_count": self.test_evidence_count,
+            "evidence_sources": list(self.evidence_sources),
+        }
+
+
+@dataclass(frozen=True)
 class TaskResult:
     """单次任务的稳定、可序列化结果。"""
 
@@ -118,7 +190,10 @@ class TaskResult:
     tests: tuple[TestEvidence, ...] = ()
     recovery: tuple[RecoveryRecord, ...] = ()
     repair_attempts: int = 0
+    model_request_count: int = 0
+    tool_calls: ToolCallSummary = ToolCallSummary()
     trace_event_count: int = 0
+    final_verification: FinalVerificationSummary = FinalVerificationSummary()
     next_steps: tuple[str, ...] = ()
     trace_references: tuple[TraceReference, ...] = ()
 
@@ -128,8 +203,8 @@ class TaskResult:
             raise ValueError("任务描述不能为空。")
         if self.repair_attempts < 0:
             raise ValueError("自动修复次数不能小于 0。")
-        if self.trace_event_count < 0:
-            raise ValueError("Trace 事件数量不能小于 0。")
+        if self.model_request_count < 0 or self.trace_event_count < 0:
+            raise ValueError("模型请求和 Trace 事件数量不能小于 0。")
         if any(not isinstance(item, str) or not item.strip() for item in self.next_steps):
             raise ValueError("下一步建议必须是非空字符串。")
         if any(not isinstance(item, TraceReference) for item in self.trace_references):
@@ -153,7 +228,10 @@ class TaskResult:
             "tests": [test.to_dict() for test in self.tests],
             "recovery": [item.to_dict() for item in self.recovery],
             "repair_attempts": self.repair_attempts,
+            "model_request_count": self.model_request_count,
+            "tool_calls": self.tool_calls.to_dict(),
             "trace_event_count": self.trace_event_count,
+            "final_verification": self.final_verification.to_dict(),
             "next_steps": list(self.next_steps),
             "trace_references": [item.to_dict() for item in self.trace_references],
         }
