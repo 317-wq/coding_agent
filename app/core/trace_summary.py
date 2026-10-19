@@ -15,6 +15,8 @@ class TraceReference:
     event: str
     timestamp: str
     summary: str = ""
+    trace_id: str = ""
+    sequence: int = 0
 
     def to_dict(self) -> dict[str, str]:
         """返回可序列化的 Trace 引用。"""
@@ -22,6 +24,8 @@ class TraceReference:
             "event": self.event,
             "timestamp": self.timestamp,
             "summary": self.summary,
+            "trace_id": self.trace_id,
+            "sequence": self.sequence,
         }
 
 
@@ -37,7 +41,9 @@ class TraceSummaryBuilder:
         "recovery_decided",
         "rollback_finished",
         "requirements_checked",
+        "safety_rejected",
         "final_state_verified",
+        "final_state_verification_failed",
     })
 
     def build(self, trace: ExecutionTrace | None, limit: int = 12) -> tuple[TraceReference, ...]:
@@ -57,6 +63,8 @@ class TraceSummaryBuilder:
                     event=event,
                     timestamp=str(item.get("timestamp", "")),
                     summary=self._summary(details),
+                    trace_id=str(item.get("trace_id", "")),
+                    sequence=int(item.get("sequence", 0)),
                 )
             )
         selected = references[:limit]
@@ -64,7 +72,8 @@ class TraceSummaryBuilder:
             (
                 item
                 for item in reversed(references)
-                if item.event == "final_state_verified"
+                if item.event
+                in {"final_state_verified", "final_state_verification_failed"}
             ),
             None,
         )
