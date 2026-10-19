@@ -511,6 +511,36 @@ class Agent:
                     f"({json.dumps(arguments, ensure_ascii=False)})"
                 )
 
+                cached_result = safety.completed_mutation(tool_name, arguments)
+                if cached_result is not None:
+                    tool_call_count += 1
+                    trace.record(
+                        "duplicate_tool_call_skipped",
+                        tool=tool_name,
+                        arguments=arguments,
+                        tool_call_id=tool_call.id,
+                        reason="相同写操作已成功完成，复用先前结果。",
+                    )
+                    trace.record(
+                        "tool_call_finished",
+                        tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        status=cached_result.status.value,
+                        result=cached_result.result,
+                        error=cached_result.error,
+                        cached=True,
+                    )
+                    result_json = cached_result.to_json()
+                    print(f"[Tool Result] {result_json[:500]}")
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result_json,
+                        }
+                    )
+                    continue
+
                 try:
                     safety.validate_tool(tool_name, arguments)
                     snapshot_paths = safety.prepare_tool(tool_name, arguments)
@@ -539,6 +569,7 @@ class Agent:
                     )
 
                 tool_call_count += 1
+                safety.record_completed_mutation(tool_name, arguments, tool_result)
 
                 if tool_result.status is ToolStatus.FAILURE and self._is_boundary_failure(tool_result):
                     reason = tool_result.error or "工具访问违反工作区安全边界。"
