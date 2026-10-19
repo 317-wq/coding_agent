@@ -19,7 +19,7 @@ from app.core.task_result import (
     ToolCallSummary,
 )
 from app.core.task_suggestions import build_task_suggestions
-from app.core.test_evidence import summarize_test_evidence
+from app.core.test_evidence import latest_test_evidence, summarize_test_evidence
 from app.core.trace_summary import summarize_trace
 from app.runtime.trace import ExecutionTrace
 from app.tools.change_set import ChangeSetSummary
@@ -111,10 +111,9 @@ class TaskResultAggregator:
             return None
         if not final_evidence.summary.verified:
             return "最终状态核验未通过，存在未完成的工具调用。"
-        latest_by_target = {item.target: item for item in tests}
         if any(
             item.status is not TestEvidenceStatus.PASSED
-            for item in latest_by_target.values()
+            for item in latest_test_evidence(tests)
         ):
             return "最终状态核验发现最新测试证据未通过。"
         return None
