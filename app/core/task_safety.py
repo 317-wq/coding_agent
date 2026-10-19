@@ -32,6 +32,7 @@ class TaskSafetySession:
         policy: RecoveryPolicy | None = None,
         task: str = "",
     ) -> None:
+        """为单次任务初始化约束、变更跟踪和恢复状态。"""
         self.workspace = workspace
         self.task = task
         self.mutations_forbidden = self._detect_mutation_prohibition(task)
@@ -65,8 +66,15 @@ class TaskSafetySession:
     def _detect_validation_task(task: str) -> bool:
         """识别只需验证一次结果、失败后不应继续探索的任务。"""
         markers = (
-            "安全边界", "完成状态", "验收", "越界", "只尝试一次",
-            "仅验证", "仅检查", "验证是否", "检查是否",
+            "安全边界",
+            "完成状态",
+            "验收",
+            "越界",
+            "只尝试一次",
+            "仅验证",
+            "仅检查",
+            "验证是否",
+            "检查是否",
         )
         return any(marker in task for marker in markers)
 
@@ -94,20 +102,23 @@ class TaskSafetySession:
         tool_name: str,
         arguments: dict[str, Any],
         result: ToolResult,
-    ) -> None:
-        """记录成功写操作，供后续重复调用安全复用。"""
+    ) -> bool:
+        """记录成功写操作，并返回是否代表实际应用了一次修改。"""
         if result.status is not ToolStatus.SUCCESS:
-            return
+            return False
         key = self._mutation_key(tool_name, arguments)
         if key is not None:
             self._completed_mutations[key] = result
+        return key is not None and not (result.result or "").startswith("无需修改")
 
     @staticmethod
     def _mutation_key(tool_name: str, arguments: dict[str, Any]) -> str | None:
         """为写工具及其规范参数生成稳定的去重键。"""
         if tool_name not in MUTATION_TOOLS:
             return None
-        return f"{tool_name}:{json.dumps(arguments, ensure_ascii=False, sort_keys=True)}"
+        return (
+            f"{tool_name}:{json.dumps(arguments, ensure_ascii=False, sort_keys=True)}"
+        )
 
     def _mutation_still_applied(
         self, tool_name: str, arguments: dict[str, Any]
@@ -145,7 +156,9 @@ class TaskSafetySession:
             return False
         return False
 
-    def prepare_tool(self, tool_name: str, arguments: dict[str, Any]) -> tuple[str, ...]:
+    def prepare_tool(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> tuple[str, ...]:
         """在写入型工具执行前捕获所有可能受影响的普通文件。"""
 
         paths: list[str] = []
@@ -176,6 +189,7 @@ class TaskSafetySession:
         *,
         plan_failed: bool = False,
     ) -> RecoveryDecision:
+        """结合工具结果、净变化和计划状态生成恢复决策。"""
         if result.status is ToolStatus.FAILURE:
             self.consecutive_tool_failures += 1
         elif result.status is ToolStatus.SUCCESS:
@@ -223,9 +237,8 @@ class TaskSafetySession:
             )
         )
 
-    def observe_completion(
-        self, status: CompletionStatus
-    ) -> RecoveryDecision:
+    def observe_completion(self, status: CompletionStatus) -> RecoveryDecision:
+        """结合完成判定与当前净变化生成任务结束阶段的恢复决策。"""
         try:
             summary = self.change_set.summary()
         except ChangeSetError as exc:
@@ -237,14 +250,13 @@ class TaskSafetySession:
         return self.policy.decide(
             RecoverySignals(
                 completion_status=status,
-                recoverable_paths=tuple(
-                    change.path for change in summary.changes
-                ),
+                recoverable_paths=tuple(change.path for change in summary.changes),
                 recovery_attempts=self.recovery_attempts,
             )
         )
 
     def reset_after_recovery(self, rollback_status: RollbackStatus) -> None:
+        """仅在回滚成功后清空本轮变更状态并开始新的恢复轮次。"""
         if rollback_status is not RollbackStatus.RESTORED:
             raise ValueError("只有确认回滚成功后才能重置任务变更会话。")
         self.recovery_attempts += 1
