@@ -12,6 +12,7 @@ class WorkspaceContext:
 
     @classmethod
     def from_path(cls, path: Path) -> "WorkspaceContext":
+        """校验并创建指向真实目录的工作区上下文。"""
         expanded = path.expanduser()
 
         if not expanded.exists():
@@ -23,12 +24,11 @@ class WorkspaceContext:
         return cls(root=expanded.resolve())
 
     def resolve(self, path: str) -> Path:
-        candidate = Path(path)
-
-        if candidate.is_absolute():
-            raise ValueError("不允许使用绝对路径。")
-
-        target = (self.root / candidate).resolve()
+        """统一解析相对路径或工作区内绝对路径，并拒绝越界。"""
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("路径不能为空。")
+        candidate = Path(path.strip()).expanduser()
+        target = candidate.resolve() if candidate.is_absolute() else (self.root / candidate).resolve()
 
         try:
             target.relative_to(self.root)
@@ -36,3 +36,9 @@ class WorkspaceContext:
             raise ValueError("禁止访问工作目录之外的路径。") from None
 
         return target
+
+    def relative_path(self, path: str) -> str:
+        """返回规范的工作区相对 POSIX 路径，根目录表示为点号。"""
+        target = self.resolve(path)
+        relative = target.relative_to(self.root).as_posix()
+        return relative or "."
