@@ -54,6 +54,31 @@ def test_completed_edit_is_reused_only_while_target_state_matches(tmp_path: Path
     assert session.completed_mutation("edit_file", arguments) is None
 
 
+def test_completed_mutation_reports_only_non_idempotent_success(tmp_path: Path):
+    """验证写操作记录只把非幂等成功标记为实际应用修改。"""
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    arguments = {"path": "module.py", "content": "value"}
+
+    assert (
+        session.record_completed_mutation(
+            "create_file", arguments, ToolResult.failure("失败")
+        )
+        is False
+    )
+    assert (
+        session.record_completed_mutation(
+            "create_file", arguments, ToolResult.success("无需修改，目标内容已存在")
+        )
+        is False
+    )
+    assert (
+        session.record_completed_mutation(
+            "create_file", arguments, ToolResult.success("创建成功")
+        )
+        is True
+    )
+
+
 def test_observe_failure_uses_current_recoverable_paths(tmp_path: Path):
     target = tmp_path / "module.py"
     target.write_text("before", encoding="utf-8")
