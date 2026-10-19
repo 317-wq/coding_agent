@@ -146,3 +146,95 @@ def test_agent_preserves_changes_and_requests_confirmation_when_rollback_is_deni
     assert "请确认" in result
     assert target.read_text(encoding="utf-8") == "broken"
     assert agent.last_recovery_decision.action is RecoveryAction.SUGGEST_ROLLBACK
+
+
+def test_agent_repairs_code_import_error_and_reruns_tests(
+    monkeypatch, tmp_path: Path
+):
+    """验证测试收集阶段的循环导入错误会驱动代码修改和成功重跑。"""
+    target = tmp_path / "calculator.py"
+    target.write_text("from calculator_history import VALUE\n", encoding="utf-8")
+    test_runs = 0
+    edits = 0
+    registry = ToolRegistry()
+
+    def run_tests(test_path="."):
+        """首次返回循环导入，代码修改后的第二次运行返回通过。"""
+        nonlocal test_runs
+        test_runs += 1
+        if test_runs == 1:
+            return ToolResult.failure(
+                "测试目标：.\n测试退出码：2\n测试结果：失败\n"
+                "测试错误类型：代码导入错误\n"
+                "ImportError: cannot import name 'VALUE' from partially initialized module"
+            )
+        return ToolResult.success(
+            "测试目标：.\n测试退出码：0\n测试结果：通过\n2 passed"
+        )
+
+    def edit_file(path):
+        """模拟模型根据导入错误完成一次实际代码修复。"""
+        nonlocal edits
+        edits += 1
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+        return "修改成功"
+
+    registry.register(
+        ToolSpec(
+            "run_tests",
+            "运行测试",
+            {
+                "type": "object",
+                "properties": {"test_path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            run_tests,
+        )
+    )
+    registry.register(
+        ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, edit_file)
+    )
+
+    class FakeModel:
+        calls = 0
+
+        def chat(self, messages, tools):
+            """依次执行失败测试、代码修复、成功重跑和最终完成。"""
+            self.calls += 1
+            if self.calls == 1:
+                return _response(tool_calls=[_call("run_tests", "test-1")])
+            if self.calls == 2:
+                assert "先根据错误定位根因" in str(messages)
+                return _response(
+                    tool_calls=[
+                        _call(
+                            "edit_file",
+                            "edit-1",
+                            '{"path":"calculator.py"}',
+                        )
+                    ]
+                )
+            if self.calls == 3:
+                return _response(tool_calls=[_call("run_tests", "test-2")])
+            return _response(content="循环导入已修复，回归测试通过")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    result = agent.run("修复循环导入问题，并运行完整回归测试")
+
+    assert result == "循环导入已修复，回归测试通过"
+    assert target.read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert edits == 1
+    assert test_runs == 2
+    assert agent.last_result.completed is True
+    assert agent.last_result.repair_attempts == 1
+    events = agent.last_trace.get_events()
+    recovery = next(
+        event
+        for event in events
+        if event["event"] == "recovery_decided"
+        and event["details"]["action"] == "replan"
+    )
+    assert "项目代码导入失败" in recovery["details"]["reason"]
+    assert not any(event["event"] == "rollback_finished" for event in events)
