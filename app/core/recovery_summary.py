@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from app.core.recovery import RecoveryDecision
+from app.core.recovery import RecoveryAction, RecoveryDecision
 from app.core.task_result import RecoveryRecord
 from app.runtime.trace import ExecutionTrace
 
@@ -19,7 +19,7 @@ class RecoverySummaryBuilder:
     ) -> tuple[RecoveryRecord, ...]:
         """汇总恢复决策、授权请求和回滚完成事件。"""
         records: list[RecoveryRecord] = []
-        if decision is not None:
+        if decision is not None and decision.action is not RecoveryAction.CONTINUE:
             records.append(
                 RecoveryRecord(
                     action=decision.action.value,
@@ -28,7 +28,7 @@ class RecoverySummaryBuilder:
                 )
             )
         if trace is None:
-            return tuple(records)
+            return self._deduplicate(records)
 
         authorization_requested = False
         for event in trace.events:
@@ -58,7 +58,24 @@ class RecoverySummaryBuilder:
                         restored_paths=tuple(details.get("restored_paths", ())),
                     )
                 )
-        return tuple(records)
+        return self._deduplicate(records)
+
+    @staticmethod
+    def _deduplicate(records: Sequence[RecoveryRecord]) -> tuple[RecoveryRecord, ...]:
+        """移除决策对象与 Trace 对同一恢复动作形成的重复记录。"""
+        result: list[RecoveryRecord] = []
+        seen: set[tuple[object, ...]] = set()
+        for record in records:
+            key = (
+                record.action,
+                record.reason,
+                record.authorized,
+                record.restored_paths,
+            )
+            if key not in seen:
+                seen.add(key)
+                result.append(record)
+        return tuple(result)
 
     @staticmethod
     def render(records: Sequence[RecoveryRecord], repair_attempts: int = 0) -> str:
