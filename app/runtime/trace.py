@@ -4,6 +4,7 @@ import json
 import re
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 MAX_STRING_LENGTH = 2000
 MAX_ITEMS = 50
@@ -145,7 +146,9 @@ def _sanitize(
 class ExecutionTrace:
     """记录单次 Agent 任务的执行事件和统计信息。"""
 
-    def __init__(self) -> None:
+    def __init__(self, trace_id: str | None = None) -> None:
+        """创建带稳定关联标识和递增事件序号的任务 Trace。"""
+        self.trace_id = trace_id or uuid4().hex
         self.events: list[dict[str, Any]] = []
 
     def record(self, event_type: str, **details: Any) -> None:
@@ -153,6 +156,8 @@ class ExecutionTrace:
         safe_details = _sanitize(details)
 
         event = {
+            "trace_id": self.trace_id,
+            "sequence": len(self.events) + 1,
             "timestamp": datetime.now(UTC).isoformat(),
             "event": _sanitize_string(event_type),
             "details": safe_details,
@@ -293,6 +298,7 @@ class ExecutionTrace:
         status, reason = self._get_status()
 
         return {
+            "trace_id": self.trace_id,
             "status": status,
             "stop_reason": reason,
             "workspace": self._get_workspace(),
