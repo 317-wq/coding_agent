@@ -82,6 +82,21 @@ def test_regression_task_plans_test_execution_without_test_authoring():
     assert not any("编写或补充测试" in objective for objective in objectives)
 
 
+def test_repair_then_rerun_does_not_imply_test_authoring():
+    """验证“修改后重跑测试”不会被误解为修改测试用例。"""
+    task = (
+        "检查现有实现，删除无用临时文件。"
+        "测试失败时进行代码修复，每次修改后必须立即重跑原测试目标。"
+    )
+
+    plan = create_task_plan(task, decision=judge_task_complexity(task))
+    objectives = tuple(step.objective for step in plan.steps)
+
+    assert any("实现或修改" in objective for objective in objectives)
+    assert any("运行指定测试" in objective for objective in objectives)
+    assert not any("编写或补充测试" in objective for objective in objectives)
+
+
 def test_replan_carries_completed_steps_and_retries_failed_step():
     """验证重规划继承已完成目标，但将失败目标恢复为待执行。"""
     task = "读取配置，然后修改代码，然后运行测试"
