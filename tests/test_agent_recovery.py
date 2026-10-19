@@ -320,6 +320,7 @@ def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
     target = tmp_path / "module.py"
     target.write_text("broken", encoding="utf-8")
     test_runs = 0
+    deferred_reads = 0
     registry = ToolRegistry()
 
     def run_tests(test_path="."):
@@ -338,6 +339,12 @@ def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
         target.write_text("fixed", encoding="utf-8")
         return "修改成功"
 
+    def read_file(path):
+        """记录本应被恢复门控暂缓的读取调用。"""
+        nonlocal deferred_reads
+        deferred_reads += 1
+        return target.read_text(encoding="utf-8")
+
     registry.register(
         ToolSpec(
             "run_tests",
@@ -352,6 +359,9 @@ def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
     )
     registry.register(
         ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, edit_file)
+    )
+    registry.register(
+        ToolSpec("read_file", "读取文件", PATH_PARAMETERS, read_file)
     )
 
     class FakeModel:
@@ -375,9 +385,13 @@ def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
                     ]
                 )
             if self.calls == 3:
-                return _response(content="代码已经修复，可以结束。")
+                return _response(
+                    tool_calls=[
+                        _call("read_file", "read-after-edit", '{"path":"module.py"}')
+                    ]
+                )
             if self.calls == 4:
-                assert "必须调用 run_tests" in str(messages)
+                assert "下一步只能调用 run_tests" in str(messages)
                 return _response(
                     tool_calls=[
                         _call("run_tests", "test-2", '{"test_path":"tests/"}')
@@ -392,6 +406,7 @@ def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
 
     assert result == "代码修复且测试通过。"
     assert test_runs == 2
+    assert deferred_reads == 0
     assert agent.last_result.completed is True
     assert agent.last_result.repair_attempts == 1
     rerun_event = next(
@@ -400,6 +415,7 @@ def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
         if event["event"] == "test_rerun_required"
     )
     assert rerun_event["details"]["test_target"] == "tests/"
+    assert rerun_event["details"]["deferred_tool_calls"] == ["read_file"]
 
 
 def test_agent_blocks_identical_failed_test_until_code_changes(
