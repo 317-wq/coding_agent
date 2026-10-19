@@ -13,7 +13,7 @@ from app.core.completion import (
 from app.core.complexity import judge_task_complexity
 from app.core.context import ContextManager
 from app.core.final_verification import FinalStateVerifier
-from app.core.planner import TaskPlan, create_task_plan
+from app.core.planner import TaskPlan, carry_completed_steps, create_task_plan
 from app.core.recovery import RecoveryAction, RecoveryDecision
 from app.core.requirements import TaskRequirementVerifier
 from app.core.result_aggregator import TaskResultAggregator
@@ -989,7 +989,12 @@ class Agent:
                 if recovery.action is RecoveryAction.REPLAN:
                     project_snapshot = ProjectExplorer(self.workspace).explore()
                     decision = judge_task_complexity(task, project_snapshot)
-                    self.last_plan = create_task_plan(task, project_snapshot, decision)
+                    replacement_plan = create_task_plan(
+                        task, project_snapshot, decision
+                    )
+                    self.last_plan = carry_completed_steps(
+                        self.last_plan, replacement_plan
+                    )
                     state_manager = PlanStateManager(self.last_plan)
                     self.last_context.begin_replan(self.last_plan)
                     messages.append(
