@@ -54,6 +54,19 @@ def test_create_directory_does_not_start_or_complete_feature_step():
     )
 
 
+def test_test_package_initializer_does_not_complete_test_authoring_step():
+    """验证 tests/__init__.py 不是测试用例完成证据。"""
+    manager = PlanStateManager(create_task_plan("实现功能，然后编写测试，然后运行测试"))
+
+    assert manager.match_step("create_file", {"path": "tests/__init__.py"}) is None
+    test_step = manager.match_step(
+        "create_file", {"path": "tests/test_todo_cli.py"}
+    )
+
+    assert test_step is not None
+    assert "编写" in manager.state().plan.steps[test_step - 1].objective
+
+
 def test_step_can_start_and_complete_without_mutating_old_plan(manager):
     original = manager.state().plan
     manager.start_step(1)
