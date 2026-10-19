@@ -163,6 +163,19 @@ def test_test_file_fixes_do_not_consume_implementation_repair_budget(
     assert session.test_repair_attempts == 1
 
 
+def test_mutation_after_success_does_not_count_as_test_repair(tmp_path: Path):
+    """验证测试已通过后的普通完善和重跑不被误报为自动修复。"""
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    arguments = {"test_path": "tests/test_sample.py"}
+    success = ToolResult.success("测试目标：tests/test_sample.py\n测试结果：通过")
+
+    session.observe("run_tests", success, arguments=arguments)
+    session.record_mutation_applied("src/sample.py")
+    session.observe("run_tests", success, arguments=arguments)
+
+    assert session.test_repair_attempts == 0
+
+
 def test_same_failed_test_requires_real_mutation_before_rerun(tmp_path: Path):
     """验证失败编辑不会放行同一测试，真实落盘修改才会放行。"""
     session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
