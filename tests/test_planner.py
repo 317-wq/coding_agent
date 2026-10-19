@@ -7,8 +7,10 @@ from app.core.planner import (
     PlanStepStatus,
     TaskPlan,
     TaskPlanner,
+    carry_completed_steps,
     create_task_plan,
 )
+from app.core.task_state import PlanStateManager
 
 
 def test_complex_task_generates_ordered_pending_steps():
@@ -78,3 +80,25 @@ def test_regression_task_plans_test_execution_without_test_authoring():
     assert any("实现或修改" in objective for objective in objectives)
     assert any("运行指定测试" in objective for objective in objectives)
     assert not any("编写或补充测试" in objective for objective in objectives)
+
+
+def test_replan_carries_completed_steps_and_retries_failed_step():
+    """验证重规划继承已完成目标，但将失败目标恢复为待执行。"""
+    task = "读取配置，然后修改代码，然后运行测试"
+    previous = create_task_plan(task, decision=judge_task_complexity(task))
+    manager = PlanStateManager(previous)
+    manager.start_step(1)
+    manager.complete_step(1)
+    manager.start_step(2)
+    manager.complete_step(2)
+    manager.start_step(3)
+    manager.fail_step(3, "测试失败")
+    replacement = create_task_plan(task, decision=judge_task_complexity(task))
+
+    carried = carry_completed_steps(manager.state().plan, replacement)
+
+    assert [step.status for step in carried.steps] == [
+        PlanStepStatus.COMPLETED,
+        PlanStepStatus.COMPLETED,
+        PlanStepStatus.PENDING,
+    ]
