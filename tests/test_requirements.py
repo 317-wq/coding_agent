@@ -36,3 +36,18 @@ def test_reports_mismatched_explicit_requirements(tmp_path: Path):
     assert any("文件不存在" in item for item in result.missing)
     assert any("ZeroDivisionError" in item for item in result.missing)
     assert any("pytest" in item for item in result.missing)
+
+
+def test_preserves_full_nested_unquoted_python_path(tmp_path: Path):
+    """验证未加反引号的嵌套测试路径不会被截断为 tests/ 后缀。"""
+    target = tmp_path / "todo_cli" / "tests" / "test_todo_cli.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def test_cli(): pass\n", encoding="utf-8")
+
+    result = TaskRequirementVerifier().verify(
+        "运行 todo_cli/tests/test_todo_cli.py 并报告结果",
+        WorkspaceContext.from_path(tmp_path),
+    )
+
+    assert result.passed is True
+    assert result.missing == ()
