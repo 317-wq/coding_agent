@@ -712,7 +712,10 @@ class Agent:
                     reported_mutation and not snapshot_paths
                 )
                 if mutation_applied:
-                    safety.record_mutation_applied()
+                    mutation_path = arguments.get("path")
+                    safety.record_mutation_applied(
+                        mutation_path if isinstance(mutation_path, str) else None
+                    )
                     trace.record(
                         "mutation_applied",
                         tool=tool_name,
