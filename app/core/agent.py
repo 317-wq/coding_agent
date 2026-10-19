@@ -390,38 +390,16 @@ class Agent:
                                 reason = f"恢复未完成：{rollback.reason}"
                                 if rollback.status is RollbackStatus.CANCELLED:
                                     rollback_denied = True
-                                    self.last_recovery_decision = RecoveryDecision(
-                                        RecoveryAction.CONTINUE,
-                                        "用户拒绝回滚，保留现有修改并重新评估任务状态。",
-                                        recovery.triggers,
-                                        recovery.recoverable_paths,
+                                    reason = (
+                                        "用户拒绝回滚，当前修改已保留；"
+                                        "请确认是否继续执行后续修复。"
                                     )
-                                    messages.append(
-                                        {"role": "assistant", "content": answer}
+                                    trace.record(
+                                        "user_confirmation_required",
+                                        reason=reason,
+                                        completion_check_id=completion_check_id,
                                     )
-                                    messages.append(
-                                        {
-                                            "role": "system",
-                                            "content": (
-                                                "用户拒绝回滚，保留当前修改。请重新评估任务状态："
-                                                "如果已有足够证据则正常结束，否则继续修复或询问用户。"
-                                            ),
-                                        }
-                                    )
-                                    project_snapshot = ProjectExplorer(
-                                        self.workspace
-                                    ).explore()
-                                    decision = judge_task_complexity(
-                                        task, project_snapshot
-                                    )
-                                    self.last_plan = create_task_plan(
-                                        task, project_snapshot, decision
-                                    )
-                                    state_manager = PlanStateManager(self.last_plan)
-                                    self.last_context = ContextManager(
-                                        task, project_snapshot, self.last_plan
-                                    )
-                                    continue
+                                    return reason
                                 trace.record(
                                     "task_stopped",
                                     reason=reason,
@@ -953,31 +931,17 @@ class Agent:
                         reason = f"恢复未完成：{rollback.reason}"
                         if rollback.status is RollbackStatus.CANCELLED:
                             rollback_denied = True
-                            self.last_recovery_decision = RecoveryDecision(
-                                RecoveryAction.CONTINUE,
-                                "用户拒绝回滚，保留现有修改并重新评估任务状态。",
-                                recovery.triggers,
-                                recovery.recoverable_paths,
+                            reason = (
+                                "用户拒绝回滚，当前修改已保留；"
+                                "请确认是否继续执行后续修复。"
                             )
-                            messages.append(
-                                {
-                                    "role": "system",
-                                    "content": (
-                                        "用户拒绝回滚，当前修改已保留。请重新评估任务状态，"
-                                        "继续执行、正常结束或明确询问用户。"
-                                    ),
-                                }
+                            trace.record(
+                                "user_confirmation_required",
+                                reason=reason,
+                                recovery_id=recovery_id,
+                                tool_call_id=tool_call.id,
                             )
-                            project_snapshot = ProjectExplorer(self.workspace).explore()
-                            decision = judge_task_complexity(task, project_snapshot)
-                            self.last_plan = create_task_plan(
-                                task, project_snapshot, decision
-                            )
-                            state_manager = PlanStateManager(self.last_plan)
-                            self.last_context = ContextManager(
-                                task, project_snapshot, self.last_plan
-                            )
-                            break
+                            return reason
                         trace.record(
                             "task_stopped",
                             reason=reason,
@@ -1027,7 +991,7 @@ class Agent:
                     decision = judge_task_complexity(task, project_snapshot)
                     self.last_plan = create_task_plan(task, project_snapshot, decision)
                     state_manager = PlanStateManager(self.last_plan)
-                    self.last_context.update_plan(self.last_plan)
+                    self.last_context.begin_replan(self.last_plan)
                     messages.append(
                         {
                             "role": "system",
