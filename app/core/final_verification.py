@@ -127,6 +127,14 @@ class FinalStateVerifier:
             if not parsed:
                 continue
             item = parsed[0]
+            if status == "failure" and item.status is not TestEvidenceStatus.FAILED:
+                item = TestEvidence(
+                    target=item.target,
+                    status=TestEvidenceStatus.FAILED,
+                    exit_code=item.exit_code,
+                    error_kind=item.error_kind,
+                    output=item.output,
+                )
             if item.target == "未标识测试":
                 item = TestEvidence(
                     target=target,
