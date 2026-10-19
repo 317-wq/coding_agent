@@ -67,6 +67,27 @@ def test_test_package_initializer_does_not_complete_test_authoring_step():
     assert "编写" in manager.state().plan.steps[test_step - 1].objective
 
 
+def test_delete_file_completes_matching_implementation_step():
+    """验证明确删除遗留文件可完成实现或修改步骤。"""
+    manager = PlanStateManager(create_task_plan("删除无用文件，然后运行测试"))
+    step_id = manager.match_step("delete_file", {"path": "module.py.new"})
+
+    assert step_id is not None
+    manager.start_step(step_id)
+
+    class SuccessResult:
+        """提供计划状态测试所需的成功工具结果。"""
+
+        status = "success"
+
+    assert manager.can_complete_step(
+        step_id,
+        "delete_file",
+        {"path": "module.py.new"},
+        SuccessResult(),
+    )
+
+
 def test_step_can_start_and_complete_without_mutating_old_plan(manager):
     original = manager.state().plan
     manager.start_step(1)
