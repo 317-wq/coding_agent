@@ -111,6 +111,28 @@ def test_first_test_failure_starts_repair_without_rollback(tmp_path: Path):
     assert session.test_repair_attempts == 0
 
 
+def test_successful_rerun_after_mutation_counts_as_repair_attempt(tmp_path: Path):
+    """验证失败基线后的代码修改和成功重跑计为一轮自动修复。"""
+    target = tmp_path / "module.py"
+    target.write_text("before", encoding="utf-8")
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    session.observe(
+        "run_tests",
+        ToolResult.failure("测试错误类型：代码导入错误\n测试结果：失败"),
+        plan_failed=True,
+    )
+    session.prepare_tool("edit_file", {"path": "module.py"})
+    target.write_text("after", encoding="utf-8")
+
+    decision = session.observe(
+        "run_tests",
+        ToolResult.success("测试目标：.\n测试退出码：0\n测试结果：通过"),
+    )
+
+    assert decision.action is RecoveryAction.CONTINUE
+    assert session.test_repair_attempts == 1
+
+
 def test_reset_after_recovery_starts_new_change_session(tmp_path: Path):
     session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
     session.prepare_tool("create_file", {"path": "new.py"})
