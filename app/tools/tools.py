@@ -463,6 +463,8 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
         match_count = content.count(old_text)
 
         if match_count == 0:
+            if new_text and new_text in content:
+                return f"无需修改，目标内容已存在：{WORKSPACE_CONTEXT.relative_path(path)}"
             return "错误：没有找到旧文本，文件未修改。"
 
         if match_count > 1:
