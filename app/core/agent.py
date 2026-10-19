@@ -65,8 +65,8 @@ class Agent:
     def __init__(
         self,
         workspace: WorkspaceContext,
-        max_steps: int = 10,
-        max_tool_calls: int = 20,
+        max_steps: int = 20,
+        max_tool_calls: int = 40,
         registry: ToolRegistry = DEFAULT_TOOL_REGISTRY,
     ) -> None:
         self.workspace = workspace
@@ -334,6 +334,15 @@ class Agent:
                                 completion_check_id=completion_check_id,
                             )
                             return decision.reason
+                        unresolved_test = safety.unresolved_test_reason()
+                        if unresolved_test is not None:
+                            trace.record(
+                                "task_stopped",
+                                reason="unresolved_test_failure",
+                                error=unresolved_test,
+                                completion_check_id=completion_check_id,
+                            )
+                            return unresolved_test
                         recovery = safety.observe_completion(decision.status)
                         self.last_recovery_decision = recovery
                         if recovery.action is not RecoveryAction.CONTINUE:
@@ -604,6 +613,49 @@ class Agent:
                     )
                     continue
 
+                rerun_block_reason = safety.test_rerun_block_reason(
+                    tool_name, arguments
+                )
+                if rerun_block_reason is not None:
+                    tool_call_count += 1
+                    tool_result = ToolResult.cancelled(rerun_block_reason)
+                    if self.last_context is not None:
+                        self.last_context.add_tool_result(tool_result)
+                    trace.record(
+                        "safety_rejected",
+                        rejection_type="test_rerun_without_mutation",
+                        tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        reason=rerun_block_reason,
+                    )
+                    trace.record(
+                        "tool_call_finished",
+                        tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        status=tool_result.status.value,
+                        result=tool_result.result,
+                        error=tool_result.error,
+                        rejected=True,
+                    )
+                    result_json = tool_result.to_json()
+                    print(f"[Tool Result] {result_json[:500]}")
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result_json,
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": rerun_block_reason,
+                        }
+                    )
+                    break
+
                 snapshot_paths: tuple[str, ...] = ()
                 pre_tool_changes: dict[str, dict] = {}
                 try:
@@ -682,6 +734,7 @@ class Agent:
                     reported_mutation and not snapshot_paths
                 )
                 if mutation_applied:
+                    safety.record_mutation_applied()
                     trace.record(
                         "mutation_applied",
                         tool=tool_name,
@@ -749,11 +802,12 @@ class Agent:
 
                 if self.last_context is not None:
                     before_trim = self.last_context.context.truncated_count
-                    self.last_context.add_tool_result(tool_result)
                     if tool_name == "run_tests":
                         self.last_context.add_test_result(
                             tool_result.result or tool_result.error or "测试执行失败"
                         )
+                    else:
+                        self.last_context.add_tool_result(tool_result)
                     if self.last_context.context.truncated_count > before_trim:
                         trace.record(
                             "context_trimmed",
@@ -808,6 +862,7 @@ class Agent:
                         tool_name,
                         tool_result,
                         plan_failed=plan_failed,
+                        arguments=arguments,
                     )
                 except Exception as exc:  # noqa: BLE001 - safety boundary
                     recovery = RecoveryDecision(
@@ -972,9 +1027,7 @@ class Agent:
                     decision = judge_task_complexity(task, project_snapshot)
                     self.last_plan = create_task_plan(task, project_snapshot, decision)
                     state_manager = PlanStateManager(self.last_plan)
-                    self.last_context = ContextManager(
-                        task, project_snapshot, self.last_plan
-                    )
+                    self.last_context.update_plan(self.last_plan)
                     messages.append(
                         {
                             "role": "system",
