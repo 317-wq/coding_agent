@@ -7,6 +7,7 @@ import pytest
 from app import tools
 from app.core.agent import Agent
 from app.runtime.workspace import WorkspaceContext
+from app.tools.authorization import AuthorizationDecision
 from app.tools.registry import ToolRegistry, ToolSpec
 from app.tools.result import ToolResult
 
@@ -86,19 +87,138 @@ def test_agent_returns_failure_json_and_stops_current_tool_batch(
     assert executions == ["fail"]
     events = agent.last_trace.get_events()
     started = next(event for event in events if event["event"] == "task_started")
-    finished = next(
-        event for event in events if event["event"] == "tool_call_finished"
-    )
+    finished = next(event for event in events if event["event"] == "tool_call_finished")
     assert started["details"]["workspace"] == str(tmp_path)
     assert finished["details"]["status"] == "failure"
     assert finished["details"]["error"] == "boom"
 
 
-def test_agent_returns_cancelled_json_and_blocks_completion(monkeypatch, tmp_path: Path):
+def test_failed_edit_without_disk_change_does_not_report_snapshot_or_mutation(
+    monkeypatch, tmp_path: Path
+):
+    """验证编辑失败且文件未变化时 Trace 不会声称已创建有效修改快照。"""
+    target = tmp_path / "module.py"
+    target.write_text("return 42", encoding="utf-8")
     registry = ToolRegistry()
     registry.register(
-        make_spec("cancel", lambda: ToolResult.cancelled("用户取消"))
+        ToolSpec(
+            "edit_file",
+            "修改文件",
+            {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            lambda path: ToolResult.failure("旧文本不存在"),
+        )
     )
+
+    class FakeModel:
+        requests = 0
+
+        def chat(self, messages, tools):
+            """首次请求失败编辑，后续返回停止说明。"""
+            self.requests += 1
+            if self.requests == 1:
+                return make_response(
+                    tool_calls=[
+                        make_tool_call("edit_file", "call-1", '{"path":"module.py"}')
+                    ]
+                )
+            return make_response(content="编辑失败")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    agent.run("修改 module.py")
+
+    assert target.read_text(encoding="utf-8") == "return 42"
+    events = agent.last_trace.get_events()
+    names = [event["event"] for event in events]
+    summary = [event for event in events if event["event"] == "change_set_updated"][-1][
+        "details"
+    ]
+    assert "snapshot_created" not in names
+    assert "mutation_applied" not in names
+    assert summary["comparison_basis"] == "task_initial_state"
+    assert summary["touched_count"] == 1
+    assert summary["unchanged_count"] == 1
+    assert summary["net_changed_count"] == 0
+    assert summary["modified_paths"] == []
+
+
+def test_failed_edit_does_not_reuse_prior_net_change_as_new_mutation(
+    monkeypatch, tmp_path: Path
+):
+    """验证文件已有净变化时，后续未落盘失败不会重复记录修改事件。"""
+    target = tmp_path / "module.py"
+    target.write_text("before", encoding="utf-8")
+
+    class DenyAuthorizer:
+        def authorize(self, tool_name, arguments):
+            """拒绝测试中的回滚请求以保留检查现场。"""
+            return AuthorizationDecision.deny("测试保留现场")
+
+    registry = ToolRegistry(authorizer=DenyAuthorizer())
+
+    def edit_file(path, content):
+        """首次写入文件，指定失败内容时保持磁盘不变。"""
+        if content == "fail":
+            return ToolResult.failure("模拟未落盘失败")
+        target.write_text(content, encoding="utf-8")
+        return "修改成功"
+
+    registry.register(
+        ToolSpec(
+            "edit_file",
+            "修改文件",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+            edit_file,
+        )
+    )
+
+    class FakeModel:
+        requests = 0
+
+        def chat(self, messages, tools):
+            """依次返回成功写入和未落盘失败写入。"""
+            self.requests += 1
+            content = "after" if self.requests == 1 else "fail"
+            return make_response(
+                tool_calls=[
+                    make_tool_call(
+                        "edit_file",
+                        f"call-{self.requests}",
+                        json.dumps({"path": "module.py", "content": content}),
+                    )
+                ]
+            )
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    agent.run("修改 module.py")
+
+    events = agent.last_trace.get_events()
+    assert target.read_text(encoding="utf-8") == "after"
+    assert sum(event["event"] == "snapshot_created" for event in events) == 1
+    assert sum(event["event"] == "mutation_applied" for event in events) == 1
+
+
+def test_agent_returns_cancelled_json_and_blocks_completion(
+    monkeypatch, tmp_path: Path
+):
+    registry = ToolRegistry()
+    registry.register(make_spec("cancel", lambda: ToolResult.cancelled("用户取消")))
 
     class FakeModel:
         def __init__(self):
@@ -107,9 +227,7 @@ def test_agent_returns_cancelled_json_and_blocks_completion(monkeypatch, tmp_pat
         def chat(self, messages, tools):
             self.requests += 1
             if self.requests == 1:
-                return make_response(
-                    tool_calls=[make_tool_call("cancel", "call-1")]
-                )
+                return make_response(tool_calls=[make_tool_call("cancel", "call-1")])
             assert json.loads(messages[-1]["content"])["status"] == "cancelled"
             return make_response(content="取消已确认")
 
@@ -145,7 +263,11 @@ def test_cancelled_tool_stops_remaining_calls_in_batch(monkeypatch, tmp_path: Pa
     agent.run("测试批次取消")
 
     assert executions == []
-    aborted = [event for event in agent.last_trace.get_events() if event["event"] == "tool_batch_aborted"]
+    aborted = [
+        event
+        for event in agent.last_trace.get_events()
+        if event["event"] == "tool_batch_aborted"
+    ]
     assert aborted[0]["details"]["skipped_calls"] == 1
 
 
@@ -206,8 +328,7 @@ def test_agent_skips_identical_successful_edit(monkeypatch, tmp_path: Path):
         )
     )
     arguments = (
-        '{"path":"completion_probe.py","old_text":"return 42",'
-        '"new_text":"return 43"}'
+        '{"path":"completion_probe.py","old_text":"return 42","new_text":"return 43"}'
     )
 
     class FakeModel:
@@ -218,9 +339,7 @@ def test_agent_skips_identical_successful_edit(monkeypatch, tmp_path: Path):
             if self.requests <= 2:
                 return make_response(
                     tool_calls=[
-                        make_tool_call(
-                            "edit_file", f"call-{self.requests}", arguments
-                        )
+                        make_tool_call("edit_file", f"call-{self.requests}", arguments)
                     ]
                 )
             return make_response(content="完成")
@@ -238,9 +357,7 @@ def test_agent_skips_identical_successful_edit(monkeypatch, tmp_path: Path):
 def test_agent_keeps_tool_call_limit(monkeypatch, tmp_path: Path):
     executions = []
     registry = ToolRegistry()
-    registry.register(
-        make_spec("once", lambda: executions.append("once") or "ok")
-    )
+    registry.register(make_spec("once", lambda: executions.append("once") or "ok"))
 
     class FakeModel:
         def chat(self, messages, tools):
@@ -270,13 +387,9 @@ def test_agent_keeps_step_limit(monkeypatch, tmp_path: Path):
 
     class FakeModel:
         def chat(self, messages, tools):
-            return make_response(
-                tool_calls=[make_tool_call("noop", "call-1")]
-            )
+            return make_response(tool_calls=[make_tool_call("noop", "call-1")])
 
     monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
-    agent = Agent(
-        WorkspaceContext.from_path(tmp_path), max_steps=1, registry=registry
-    )
+    agent = Agent(WorkspaceContext.from_path(tmp_path), max_steps=1, registry=registry)
 
     assert agent.run("测试轮数上限").startswith("已达到最大执行轮数 1")
