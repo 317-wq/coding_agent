@@ -110,6 +110,22 @@ class ContextManager:
         self._trim()
         return self._context
 
+    def begin_replan(self, plan: TaskPlan) -> TaskContext:
+        """切换到恢复计划，并丢弃已经触发重规划的旧失败工具结果。"""
+        successful_results = tuple(
+            result
+            for result in self._context.tool_results
+            if result.status is ToolStatus.SUCCESS
+        )
+        self._context = replace(
+            self._context,
+            plan=plan,
+            current_step_id=None,
+            tool_results=successful_results,
+        )
+        self._trim()
+        return self._context
+
     def _trim(self) -> None:
         tools = list(self._context.tool_results)
         tests = list(self._context.test_results)
