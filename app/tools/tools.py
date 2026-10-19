@@ -505,10 +505,16 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
 
 
 def run_tests(test_path: str = ".") -> str:
-    """运行指定测试文件、测试目录或整个工作区的 pytest。"""
+    """运行指定测试文件、目录、pytest node id 或整个工作区。"""
     try:
-        target_path = _resolve_path(test_path)
-        canonical_target = WORKSPACE_CONTEXT.relative_path(test_path)
+        path_part, separator, node_part = test_path.partition("::")
+        if not path_part:
+            return f"错误：测试路径不存在：{test_path}"
+        target_path = _resolve_path(path_part)
+        canonical_path = WORKSPACE_CONTEXT.relative_path(path_part)
+        canonical_target = (
+            f"{canonical_path}::{node_part}" if separator else canonical_path
+        )
 
         if not target_path.exists():
             return f"错误：测试路径不存在：{test_path}"
@@ -524,7 +530,7 @@ def run_tests(test_path: str = ".") -> str:
             "-m",
             "pytest",
             "-q",
-            str(target_path),
+            f"{target_path}::{node_part}" if separator else str(target_path),
         ]
 
         child_env = os.environ.copy()
