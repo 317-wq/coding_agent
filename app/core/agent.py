@@ -46,6 +46,7 @@ SYSTEM_PROMPT = """
 10. 不要执行用户任务之外的操作，不要声称完成了实际没有完成的工作。
 11. 完成任务后，用中文总结修改了哪些文件、做了什么，以及测试结果。
 12. 不要直接把需要执行的代码当成最终答案，应使用工具实际创建或修改文件。
+13. 同一批次的工具调用按顺序执行；任一调用失败或取消后，停止该批次剩余调用并重新判断任务状态。
 """
 
 
@@ -436,7 +437,7 @@ class Agent:
             )
 
             # 按顺序执行工具调用。
-            for tool_call in message.tool_calls:
+            for call_index, tool_call in enumerate(message.tool_calls):
                 if tool_call_count >= self.max_tool_calls:
                     reason = (
                         f"已达到工具调用上限 {self.max_tool_calls}，"
@@ -770,8 +771,15 @@ class Agent:
                     self._print_trace_summary(trace)
                     return recovery.reason
 
-                # 工具返回错误时，停止本批次剩余调用，交由模型重新判断。
-                if tool_result.status is ToolStatus.FAILURE:
+                # 批次采用失败关闭规则：失败或取消后均停止剩余调用，
+                # 避免后续工具建立在无效前置结果之上。
+                if tool_result.status is not ToolStatus.SUCCESS:
+                    trace.record(
+                        "tool_batch_aborted",
+                        tool=tool_name,
+                        status=tool_result.status.value,
+                        skipped_calls=len(message.tool_calls) - call_index - 1,
+                    )
                     break
 
         trace.record(
