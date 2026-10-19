@@ -96,6 +96,7 @@ class TaskPlanner:
 
     @staticmethod
     def _extract_objectives(task: str, complexity: TaskComplexity) -> list[str]:
+        """从用户任务归并阅读、实现、测试编写和测试执行目标。"""
         # 计划按开发意图归并，而不是按句号、编号或连接词机械切片。
         normalized = re.sub(
             r"(?m)^\s*(?:#{1,6}\s*|(?:\d+|[一二三四五六七八九十]+)[、.)）:]\s*)",
@@ -124,24 +125,36 @@ class TaskPlanner:
                 if piece and not re.fullmatch(r"[\d\W_]+", piece):
                     parts.append(piece)
 
-        if complexity is TaskComplexity.SIMPLE or len(parts) <= 1:
+        if complexity is TaskComplexity.SIMPLE:
             cleaned = "；".join(parts) if parts else normalized.strip()
             return [f"完成用户任务：{cleaned}"]
 
         # 长任务通常是需求清单。把多个细节归并成少量可验证的开发目标，
         # 避免每个函数、编号或断言都变成独立计划步骤。
-        if len(parts) > 5 or len(normalized) > 180:
+        if len(parts) > 5 or len(normalized) > 180 or len(parts) <= 1:
             objectives: list[str] = []
-            lowered = normalized.lower()
+            actionable_test_text = re.sub(
+                r"(?:不要|不得|禁止).{0,12}(?:测试|用例|断言)",
+                "",
+                normalized,
+            )
             if re.search(r"阅读|查看|读取|现有代码|项目结构|检查", normalized):
                 objectives.append("阅读现有代码和项目结构")
             if re.search(r"实现|新增|添加|创建|修改|更新|修复|重构|优化", normalized):
                 objectives.append("实现或修改任务要求的功能")
-            if re.search(r"测试|pytest|用例|断言", lowered):
+            if re.search(
+                r"(?:编写|补充|新增|添加|创建|修改).{0,8}(?:测试|用例|断言)",
+                actionable_test_text,
+            ):
                 objectives.append("编写或补充测试用例")
-            if re.search(r"运行测试|执行测试|验证|通过测试", normalized):
+            if re.search(
+                r"运行.{0,8}测试|执行.{0,8}测试|回归测试|完整测试|测试通过|验证",
+                normalized,
+            ):
                 objectives.append("运行指定测试并记录结果")
-            return [f"完成：{objective}" for objective in objectives]
+            if objectives:
+                return [f"完成：{objective}" for objective in objectives]
+            return [f"完成用户任务：{normalized.strip()}"]
 
         return [f"完成：{part}" for part in parts]
 
