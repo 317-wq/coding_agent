@@ -16,7 +16,9 @@ class RequirementCheck:
 class TaskRequirementVerifier:
     """只核对可从工作区静态确认的明确要求，不替代模型语义判断。"""
 
-    _PATH_PATTERN = re.compile(r"(?:`([^`]+)`|\b((?:tests?/|app/)[\w./-]+\.py)\b)")
+    _PATH_PATTERN = re.compile(
+        r"(?:`([^`]+)`|(?<![\w./-])((?:[\w.-]+/)+[\w.-]+\.py)\b)"
+    )
     _EXCEPTION_PATTERN = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:Error|Exception)\b")
 
     def verify(self, task: str, workspace: WorkspaceContext) -> RequirementCheck:
