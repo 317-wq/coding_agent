@@ -240,6 +240,79 @@ def test_agent_repairs_code_import_error_and_reruns_tests(
     assert not any(event["event"] == "rollback_finished" for event in events)
 
 
+def test_simple_task_can_create_recovery_plan_after_test_failure(
+    monkeypatch, tmp_path: Path
+):
+    """验证初始无计划的简单任务可在测试失败后安全建立恢复计划。"""
+    target = tmp_path / "module.py"
+    target.write_text("broken", encoding="utf-8")
+    test_runs = 0
+    registry = ToolRegistry()
+
+    def run_tests(test_path="."):
+        """首次返回断言失败，真实修改后的第二次测试返回通过。"""
+        nonlocal test_runs
+        test_runs += 1
+        if test_runs == 1:
+            return ToolResult.failure(
+                f"测试目标：{test_path}\n测试退出码：1\n"
+                "测试结果：失败\n测试错误类型：断言失败"
+            )
+        return f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过"
+
+    def edit_file(path):
+        """模拟简单任务测试失败后的实际修复。"""
+        target.write_text("fixed", encoding="utf-8")
+        return "修改成功"
+
+    registry.register(
+        ToolSpec(
+            "run_tests",
+            "运行测试",
+            {
+                "type": "object",
+                "properties": {"test_path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            run_tests,
+        )
+    )
+    registry.register(
+        ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, edit_file)
+    )
+
+    class FakeModel:
+        """依次返回失败测试、修复、成功测试和完成总结。"""
+
+        calls = 0
+
+        def chat(self, messages, tools):
+            """按简单任务恢复流程返回下一动作。"""
+            self.calls += 1
+            if self.calls == 1:
+                return _response(tool_calls=[_call("run_tests", "test-1")])
+            if self.calls == 2:
+                return _response(
+                    tool_calls=[
+                        _call("edit_file", "edit-1", '{"path":"module.py"}')
+                    ]
+                )
+            if self.calls == 3:
+                return _response(tool_calls=[_call("run_tests", "test-2")])
+            return _response(content="简单任务已修复并通过测试")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    result = agent.run("运行测试")
+
+    assert result == "简单任务已修复并通过测试"
+    assert target.read_text(encoding="utf-8") == "fixed"
+    assert agent.last_plan is not None
+    assert agent.last_result.completed is True
+    assert test_runs == 2
+
+
 def test_agent_blocks_identical_failed_test_until_code_changes(
     monkeypatch, tmp_path: Path
 ):
