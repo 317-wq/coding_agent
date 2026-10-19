@@ -70,7 +70,8 @@ class TaskReportRenderer:
         lines.append("关键 Trace：")
         if result.trace_references:
             lines.extend(
-                f"  - {item.event}（{item.timestamp}）{': ' + item.summary if item.summary else ''}"
+                f"  - #{item.sequence} {item.event}（{item.timestamp}）"
+                f"{': ' + item.summary if item.summary else ''}"
                 for item in result.trace_references
             )
         else:
