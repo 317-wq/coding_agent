@@ -1,10 +1,12 @@
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from app import tools
+from app.cli.main import _parse_options
 from app.core.agent import Agent
 from app.runtime.workspace import WorkspaceContext
 from app.tools.authorization import AuthorizationDecision
@@ -444,6 +446,38 @@ def test_agent_keeps_step_limit(monkeypatch, tmp_path: Path):
     agent = Agent(WorkspaceContext.from_path(tmp_path), max_steps=1, registry=registry)
 
     assert agent.run("测试轮数上限").startswith("已达到最大执行轮数 1")
+
+
+def test_agent_uses_larger_default_execution_limits(tmp_path: Path):
+    """验证默认轮数和工具调用数足以支持多轮诊断修复。"""
+    agent = Agent(WorkspaceContext.from_path(tmp_path))
+
+    assert agent.max_steps == 20
+    assert agent.max_tool_calls == 40
+
+
+def test_cli_accepts_custom_execution_limits(monkeypatch, tmp_path: Path):
+    """验证 CLI 参数能够覆盖默认执行资源上限。"""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agent",
+            "--workspace",
+            str(tmp_path),
+            "--max-steps",
+            "30",
+            "--max-tool-calls",
+            "60",
+        ],
+    )
+
+    workspace, output_format, max_steps, max_tool_calls = _parse_options()
+
+    assert workspace.root == tmp_path.resolve()
+    assert output_format == "text"
+    assert max_steps == 30
+    assert max_tool_calls == 60
 
 
 def test_final_report_uses_disk_and_trace_instead_of_model_claims(
