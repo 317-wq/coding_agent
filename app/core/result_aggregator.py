@@ -193,7 +193,10 @@ class TaskResultAggregator:
             return ()
         paths: list[str] = []
         for event in trace.events:
-            if event["event"] == "rollback_finished":
+            if (
+                event["event"] == "rollback_finished"
+                and event.get("details", {}).get("status") in {"conflict", "failed"}
+            ):
                 paths.extend(str(path) for path in event.get("details", {}).get("pending_paths", ()))
         return tuple(dict.fromkeys(paths))
 
