@@ -89,7 +89,7 @@ class PlanStateManager:
                     score += 5 if "编写" in text or "补充" in text else 0
                 score += 4 if not in_tests and any(
                     word in text
-                    for word in ("实现", "修改", "修复", "创建", "新增", "功能")
+                    for word in ("实现", "修改", "修复", "创建", "新增", "删除", "功能")
                 ) else 0
             if tool_name == "run_tests":
                 score += 6 if "运行" in text or "验证" in text else 0
@@ -125,8 +125,16 @@ class PlanStateManager:
             return tool_name in {"create_file", "edit_file"} and self._is_test_source_path(path)
         if "运行" in text or "验证" in text:
             return tool_name == "run_tests"
-        if any(word in text for word in ("实现", "修改", "修复", "创建", "新增", "功能")):
-            return tool_name in {"create_file", "edit_file"} and not (
+        if any(
+            word in text
+            for word in ("实现", "修改", "修复", "创建", "新增", "删除", "功能")
+        ):
+            return tool_name in {
+                "create_file",
+                "edit_file",
+                "delete_file",
+                "delete_directory",
+            } and not (
                 path.startswith("tests/") or "/tests/" in path
             )
         return tool_name in {"create_file", "edit_file", "run_tests"}
