@@ -52,6 +52,29 @@ def test_run_tests_marks_pytest_collection_conflict(tmp_path: Path):
     assert "测试结果：失败" in result
 
 
+def test_run_tests_marks_circular_import_as_repairable_code_error(tmp_path: Path):
+    """验证循环导入不会被误判为不可修复的测试环境问题。"""
+    (tmp_path / "module_a.py").write_text(
+        "from module_b import VALUE_B\nVALUE_A = 1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "module_b.py").write_text(
+        "from module_a import VALUE_A\nVALUE_B = 2\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "test_cycle.py").write_text(
+        "from module_a import VALUE_A\n\ndef test_value():\n    assert VALUE_A == 1\n",
+        encoding="utf-8",
+    )
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+
+    result = tools.run_tests("test_cycle.py")
+
+    assert "测试结果：失败" in result
+    assert "测试错误类型：代码导入错误" in result
+    assert "partially initialized module" in result
+
+
 def test_name_error_in_test_code_is_classified_for_repair(tmp_path: Path):
     test_file = tmp_path / "test_calculator.py"
     test_file.write_text(
