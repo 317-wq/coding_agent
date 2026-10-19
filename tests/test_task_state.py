@@ -40,6 +40,20 @@ def test_create_test_file_matches_test_step_not_implementation_step():
     assert "测试" in manager.state().plan.steps[step_id - 1].objective
 
 
+def test_create_directory_does_not_start_or_complete_feature_step():
+    """验证仅创建源码或测试目录不会推进对应计划步骤。"""
+    manager = PlanStateManager(
+        create_task_plan("实现功能，然后编写测试，然后运行测试")
+    )
+
+    assert manager.match_step("create_directory", {"path": "todo_cli"}) is None
+    assert manager.match_step("create_directory", {"path": "tests"}) is None
+    assert manager.state().current_step_id is None
+    assert all(
+        step.status is PlanStepStatus.PENDING for step in manager.state().plan.steps
+    )
+
+
 def test_step_can_start_and_complete_without_mutating_old_plan(manager):
     original = manager.state().plan
     manager.start_step(1)

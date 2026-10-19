@@ -313,6 +313,95 @@ def test_simple_task_can_create_recovery_plan_after_test_failure(
     assert test_runs == 2
 
 
+def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
+    monkeypatch, tmp_path: Path
+):
+    """验证失败后的实际修改必须重跑，模型提前总结不会终止恢复流程。"""
+    target = tmp_path / "module.py"
+    target.write_text("broken", encoding="utf-8")
+    test_runs = 0
+    registry = ToolRegistry()
+
+    def run_tests(test_path="."):
+        """首次失败，修改后的强制重跑返回成功。"""
+        nonlocal test_runs
+        test_runs += 1
+        if test_runs == 1:
+            return ToolResult.failure(
+                f"测试目标：{test_path}\n测试退出码：1\n"
+                "测试结果：失败\n测试错误类型：断言失败"
+            )
+        return f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过"
+
+    def edit_file(path):
+        """模拟测试失败后对业务实现进行一次真实修改。"""
+        target.write_text("fixed", encoding="utf-8")
+        return "修改成功"
+
+    registry.register(
+        ToolSpec(
+            "run_tests",
+            "运行测试",
+            {
+                "type": "object",
+                "properties": {"test_path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            run_tests,
+        )
+    )
+    registry.register(
+        ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, edit_file)
+    )
+
+    class FakeModel:
+        """先提前总结一次，再遵循控制层要求重跑测试。"""
+
+        calls = 0
+
+        def chat(self, messages, tools):
+            """按失败、修改、错误总结、重跑和完成的顺序返回响应。"""
+            self.calls += 1
+            if self.calls == 1:
+                return _response(
+                    tool_calls=[
+                        _call("run_tests", "test-1", '{"test_path":"tests/"}')
+                    ]
+                )
+            if self.calls == 2:
+                return _response(
+                    tool_calls=[
+                        _call("edit_file", "edit-1", '{"path":"module.py"}')
+                    ]
+                )
+            if self.calls == 3:
+                return _response(content="代码已经修复，可以结束。")
+            if self.calls == 4:
+                assert "必须调用 run_tests" in str(messages)
+                return _response(
+                    tool_calls=[
+                        _call("run_tests", "test-2", '{"test_path":"tests/"}')
+                    ]
+                )
+            return _response(content="代码修复且测试通过。")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    result = agent.run("修复代码并运行 tests/ 回归测试")
+
+    assert result == "代码修复且测试通过。"
+    assert test_runs == 2
+    assert agent.last_result.completed is True
+    assert agent.last_result.repair_attempts == 1
+    rerun_event = next(
+        event
+        for event in agent.last_trace.get_events()
+        if event["event"] == "test_rerun_required"
+    )
+    assert rerun_event["details"]["test_target"] == "tests/"
+
+
 def test_agent_blocks_identical_failed_test_until_code_changes(
     monkeypatch, tmp_path: Path
 ):
