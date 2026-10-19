@@ -38,8 +38,8 @@ def _parse_args() -> WorkspaceContext:
     return _parse_options()[0]
 
 
-def _parse_options() -> tuple[WorkspaceContext, str]:
-    """解析工作区和任务报告输出格式。"""
+def _parse_options() -> tuple[WorkspaceContext, str, int, int]:
+    """解析工作区、报告格式以及 Agent 执行资源上限。"""
     parser = argparse.ArgumentParser(description="Mini Coding Agent")
     parser.add_argument(
         "--workspace",
@@ -53,9 +53,30 @@ def _parse_options() -> tuple[WorkspaceContext, str]:
         default="text",
         help="任务结果报告格式，默认为 text",
     )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=20,
+        help="单个任务最大模型执行轮数，默认为 20",
+    )
+    parser.add_argument(
+        "--max-tool-calls",
+        type=int,
+        default=40,
+        help="单个任务最大工具调用次数，默认为 40",
+    )
     args = parser.parse_args()
+    if args.max_steps < 1:
+        parser.error("--max-steps 必须大于 0")
+    if args.max_tool_calls < 1:
+        parser.error("--max-tool-calls 必须大于 0")
     try:
-        return WorkspaceContext.from_path(args.workspace), args.output_format
+        return (
+            WorkspaceContext.from_path(args.workspace),
+            args.output_format,
+            args.max_steps,
+            args.max_tool_calls,
+        )
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -63,7 +84,7 @@ def _parse_options() -> tuple[WorkspaceContext, str]:
 def main() -> None:
     """程序入口。"""
 
-    workspace, output_format = _parse_options()
+    workspace, output_format, max_steps, max_tool_calls = _parse_options()
 
     print("=" * 50)
     print("Mini Coding Agent")
@@ -71,7 +92,11 @@ def main() -> None:
     print("输入 exit 或 quit 退出程序")
     print("=" * 50)
 
-    agent = Agent(workspace=workspace)
+    agent = Agent(
+        workspace=workspace,
+        max_steps=max_steps,
+        max_tool_calls=max_tool_calls,
+    )
 
     while True:
         try:
