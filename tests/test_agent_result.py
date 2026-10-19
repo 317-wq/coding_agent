@@ -177,6 +177,90 @@ def test_replanned_task_can_complete_after_earlier_tool_failure(
     )
 
 
+def test_test_replan_preserves_completed_read_and_implementation_steps(
+    monkeypatch, tmp_path: Path
+):
+    """验证测试修复重规划不会要求重复已完成的阅读和实现步骤。"""
+    target = tmp_path / "module.py"
+    target.write_text("broken", encoding="utf-8")
+    registry = ToolRegistry()
+    path_parameters = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+        "additionalProperties": False,
+    }
+    test_runs = 0
+
+    def edit_file(path):
+        """依次完成初始实现和测试失败后的修复。"""
+        current = target.read_text(encoding="utf-8")
+        target.write_text(f"{current}-fixed", encoding="utf-8")
+        return "修改成功"
+
+    def run_tests(test_path="."):
+        """首次返回断言失败，修复后返回通过。"""
+        nonlocal test_runs
+        test_runs += 1
+        if test_runs == 1:
+            return ToolResult.failure(
+                f"测试目标：{test_path}\n测试退出码：1\n"
+                "测试结果：失败\n测试错误类型：断言失败"
+            )
+        return f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过"
+
+    registry.register(
+        ToolSpec(
+            "read_file",
+            "读取文件",
+            path_parameters,
+            lambda path: target.read_text(encoding="utf-8"),
+        )
+    )
+    registry.register(ToolSpec("edit_file", "修改文件", path_parameters, edit_file))
+    registry.register(
+        ToolSpec(
+            "run_tests",
+            "运行测试",
+            {
+                "type": "object",
+                "properties": {"test_path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            run_tests,
+        )
+    )
+
+    class FakeModel:
+        """执行完整的读取、实现、失败测试、修复和成功测试流程。"""
+
+        calls = 0
+
+        def chat(self, messages, tools):
+            """返回当前阶段需要执行的唯一工具调用。"""
+            self.calls += 1
+            sequence = {
+                1: make_tool_call("read_file", "read", '{"path":"module.py"}'),
+                2: make_tool_call("edit_file", "initial-edit", '{"path":"module.py"}'),
+                3: make_tool_call("run_tests", "failed-test", '{"test_path":"tests"}'),
+                4: make_tool_call("edit_file", "repair-edit", '{"path":"module.py"}'),
+                5: make_tool_call("run_tests", "passed-test", '{"test_path":"tests"}'),
+            }
+            if self.calls in sequence:
+                return make_response(tool_calls=[sequence[self.calls]])
+            return make_response(content="修复和回归测试均已完成。")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    result = agent.run("读取配置，然后修改代码，然后运行测试")
+
+    assert result == "修复和回归测试均已完成。"
+    assert agent.last_result.completed is True
+    assert agent.model.calls == 6
+    assert all(step.status.value == "completed" for step in agent.last_plan.steps)
+
+
 def test_workspace_boundary_rejection_has_explicit_correlated_trace(
     monkeypatch, tmp_path: Path
 ):
