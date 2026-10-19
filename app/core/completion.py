@@ -32,6 +32,7 @@ class CompletionDecision:
         return self.status is CompletionStatus.COMPLETE
 
     def to_dict(self) -> dict[str, Any]:
+        """返回可序列化的完成判定及其证据。"""
         return {
             "status": self.status.value,
             "completed": self.completed,
@@ -42,6 +43,7 @@ class CompletionDecision:
         }
 
     def to_json(self) -> str:
+        """将完成判定序列化为稳定 JSON。"""
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
 
@@ -61,6 +63,7 @@ class CompletionVerifier:
         tool_results: Sequence[ToolResult] = (),
         test_results: Sequence[str] = (),
     ) -> CompletionDecision:
+        """根据计划状态、工具结果和测试结果严格判定复杂任务。"""
         if not isinstance(plan, TaskPlan):
             raise TypeError("计划必须是 TaskPlan。")
         if any(not isinstance(item, ToolResult) for item in tool_results):
@@ -93,6 +96,8 @@ class CompletionVerifier:
             return CompletionDecision(
                 CompletionStatus.BLOCKED,
                 "存在失败或取消的工具结果。",
+                pending_step_ids=pending,
+                failed_step_ids=failed,
                 evidence=failed_tools,
             )
 
@@ -104,6 +109,8 @@ class CompletionVerifier:
             return CompletionDecision(
                 CompletionStatus.BLOCKED,
                 "测试结果包含失败或错误。",
+                pending_step_ids=pending,
+                failed_step_ids=failed,
                 evidence=failed_tests,
             )
 
@@ -121,19 +128,12 @@ class CompletionVerifier:
                 CompletionStatus.INCOMPLETE,
                 "缺少工具或测试的结构化完成证据。",
             )
-        # 计划状态可能因模型未逐步回写而滞后；只有目标测试也通过时，
-        # 才允许代码证据覆盖 pending 状态，避免单个任意工具调用误报完成。
-        if pending and not successful_tests:
-            return CompletionDecision(
-                CompletionStatus.INCOMPLETE,
-                "仍有计划步骤未完成，且缺少通过的目标测试证据。",
-                pending,
-                evidence=evidence,
-            )
+        # 计划是任务目标的结构化表达。测试通过只能证明测试步骤，不能替代
+        # 尚未完成的阅读、实现或其他必要步骤，因此 pending 永远不能判为完成。
         if pending:
             return CompletionDecision(
-                CompletionStatus.COMPLETE,
-                "已有代码修改和目标测试等结构化证据，计划状态未完全同步。",
+                CompletionStatus.INCOMPLETE,
+                "仍有必要计划步骤未完成，现有工具或测试证据不能替代这些步骤。",
                 pending,
                 evidence=evidence,
             )
@@ -155,12 +155,12 @@ class CompletionVerifier:
         failures = tuple(
             item.error or item.result or "工具执行失败"
             for item in tool_results
-            if item.status is ToolStatus.FAILURE
+            if item.status in {ToolStatus.FAILURE, ToolStatus.CANCELLED}
         )
         if failures:
             return CompletionDecision(
                 CompletionStatus.BLOCKED,
-                "存在失败的工具结果。",
+                "存在失败或取消的工具结果。",
                 evidence=failures,
             )
         normalized_tests = tuple(item.strip() for item in test_results if item.strip())
@@ -176,7 +176,7 @@ class CompletionVerifier:
         evidence = tuple(
             (item.result or "工具执行成功")
             for item in tool_results
-            if item.status in {ToolStatus.SUCCESS, ToolStatus.CANCELLED}
+            if item.status is ToolStatus.SUCCESS
         ) + tuple(
             item for item in normalized_tests if self._SUCCESS_PATTERN.search(item)
         )
