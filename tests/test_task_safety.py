@@ -134,6 +134,35 @@ def test_successful_rerun_after_mutation_counts_as_repair_attempt(tmp_path: Path
     assert session.test_repair_attempts == 1
 
 
+def test_test_file_fixes_do_not_consume_implementation_repair_budget(
+    tmp_path: Path,
+):
+    """验证修正测试脚手架不会挤占两次业务代码自动修复额度。"""
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    failure = ToolResult.failure(
+        "测试错误类型：测试代码\n测试结果：失败\n"
+        "FAILED tests/test_sample.py::test_value"
+    )
+    arguments = {"test_path": "tests/test_sample.py"}
+
+    session.observe("run_tests", failure, arguments=arguments)
+    session.record_mutation_applied("tests/test_sample.py")
+    first_retry = session.observe("run_tests", failure, arguments=arguments)
+
+    assert first_retry.action is RecoveryAction.REPLAN
+    assert session.test_repair_attempts == 0
+
+    session.record_mutation_applied("src/sample.py")
+    final_retry = session.observe(
+        "run_tests",
+        ToolResult.success("测试目标：tests/test_sample.py\n测试结果：通过"),
+        arguments=arguments,
+    )
+
+    assert final_retry.action is RecoveryAction.CONTINUE
+    assert session.test_repair_attempts == 1
+
+
 def test_same_failed_test_requires_real_mutation_before_rerun(tmp_path: Path):
     """验证失败编辑不会放行同一测试，真实落盘修改才会放行。"""
     session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
