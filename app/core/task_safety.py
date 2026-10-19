@@ -284,6 +284,7 @@ class TaskSafetySession:
             if (
                 self.last_test_generation is not None
                 and self.mutation_generation > self.last_test_generation
+                and self.last_failed_test_error is not None
                 and self._has_implementation_mutation_since_test()
             ):
                 self.test_repair_attempts += 1
