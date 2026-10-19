@@ -93,6 +93,57 @@ def test_agent_returns_failure_json_and_stops_current_tool_batch(
     assert finished["details"]["error"] == "boom"
 
 
+def test_workspace_boundary_rejection_has_explicit_correlated_trace(
+    monkeypatch, tmp_path: Path
+):
+    """验证路径安全拒绝拥有独立事件并关联到对应工具调用。"""
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            "read_file",
+            "读取文件",
+            {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            lambda path: ToolResult.failure("禁止访问工作目录之外的路径。"),
+        )
+    )
+
+    class FakeModel:
+        def chat(self, messages, tools):
+            """请求一次越界路径读取。"""
+            return make_response(
+                tool_calls=[
+                    make_tool_call(
+                        "read_file",
+                        "boundary-1",
+                        '{"path":"../../README.md"}',
+                    )
+                ]
+            )
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    result = agent.run("读取 ../../README.md")
+
+    assert "工作目录之外" in result
+    events = agent.last_trace.get_events()
+    rejection = next(event for event in events if event["event"] == "safety_rejected")
+    finished = next(event for event in events if event["event"] == "tool_call_finished")
+    stopped = next(event for event in events if event["event"] == "task_stopped")
+    assert rejection["details"]["rejection_type"] == "workspace_boundary"
+    assert rejection["details"]["tool_call_id"] == "boundary-1"
+    assert finished["details"]["tool_call_id"] == "boundary-1"
+    assert stopped["details"]["tool_call_id"] == "boundary-1"
+    assert rejection["trace_id"] == finished["trace_id"] == stopped["trace_id"]
+    assert rejection["sequence"] < finished["sequence"] < stopped["sequence"]
+    assert agent.last_trace.get_statistics()["tool_calls"]["unfinished"] == 0
+
+
 def test_failed_edit_without_disk_change_does_not_report_snapshot_or_mutation(
     monkeypatch, tmp_path: Path
 ):
