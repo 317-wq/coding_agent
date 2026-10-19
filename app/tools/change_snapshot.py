@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,10 +30,12 @@ class FileSnapshot:
 
     @property
     def size(self) -> int:
+        """返回快照保存的原始内容字节数。"""
         return len(self.content) if self.content is not None else 0
 
     @property
     def content_sha256(self) -> str | None:
+        """返回原始内容摘要，原路径不存在时返回空值。"""
         if self.content is None:
             return None
         return hashlib.sha256(self.content).hexdigest()
@@ -60,6 +63,7 @@ class TaskSnapshotStore:
         max_files: int = MAX_SNAPSHOT_FILES,
         max_total_size: int = MAX_SNAPSHOT_TOTAL_SIZE,
     ) -> None:
+        """创建带文件数、单文件和总容量限制的任务快照存储。"""
         if max_file_size < 1 or max_files < 1 or max_total_size < 1:
             raise ValueError("快照容量限制必须大于 0。")
         self.workspace = workspace
@@ -70,13 +74,16 @@ class TaskSnapshotStore:
 
     @property
     def snapshots(self) -> tuple[FileSnapshot, ...]:
+        """按首次捕获顺序返回不可变快照集合。"""
         return tuple(self._snapshots.values())
 
     @property
     def total_size(self) -> int:
+        """返回当前全部快照内容占用的总字节数。"""
         return sum(snapshot.size for snapshot in self._snapshots.values())
 
     def get(self, path: str) -> FileSnapshot | None:
+        """按统一规范路径查询已经捕获的快照。"""
         normalized, _ = self._resolve(path)
         return self._snapshots.get(normalized)
 
@@ -109,9 +116,7 @@ class TaskSnapshotStore:
             ):
                 raise SnapshotError(f"读取快照期间文件发生变化：{normalized}")
             if self.total_size + len(content) > self.max_total_size:
-                raise SnapshotError(
-                    f"快照总大小超过上限 {self.max_total_size} 字节。"
-                )
+                raise SnapshotError(f"快照总大小超过上限 {self.max_total_size} 字节。")
             snapshot = FileSnapshot(
                 path=normalized,
                 existed=True,
@@ -123,6 +128,7 @@ class TaskSnapshotStore:
         return snapshot
 
     def to_dict(self) -> dict[str, Any]:
+        """返回不泄漏原始内容的快照存储元数据。"""
         return {
             "file_count": len(self._snapshots),
             "total_size": self.total_size,
@@ -130,21 +136,25 @@ class TaskSnapshotStore:
         }
 
     def to_json(self) -> str:
+        """将快照存储元数据序列化为稳定 JSON。"""
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
     def _resolve(self, path: str) -> tuple[str, Path]:
+        """按共享工作区规则规范路径，并拒绝符号链接快照。"""
         if not isinstance(path, str) or not path.strip() or path.strip() == ".":
             raise SnapshotError("快照路径必须指向工作区内的具体文件。")
-        candidate = Path(path.strip())
-        if candidate.is_absolute():
-            raise SnapshotError("快照路径不能是绝对路径。")
+        candidate = Path(path.strip()).expanduser()
+        lexical_target = (
+            candidate if candidate.is_absolute() else self.workspace.root / candidate
+        )
+        lexical_target = Path(os.path.abspath(lexical_target))
+        try:
+            lexical_relative = lexical_target.relative_to(self.workspace.root)
+        except ValueError:
+            raise SnapshotError("禁止访问工作目录之外的路径。") from None
 
         current = self.workspace.root
-        for part in candidate.parts:
-            if part == "..":
-                raise SnapshotError("禁止访问工作目录之外的路径。")
-            if part in {"", "."}:
-                continue
+        for part in lexical_relative.parts:
             current /= part
             if current.is_symlink():
                 raise SnapshotError(f"不允许快照符号链接路径：{path}")
@@ -154,4 +164,5 @@ class TaskSnapshotStore:
         except ValueError as exc:
             raise SnapshotError(str(exc)) from exc
         normalized = target.relative_to(self.workspace.root).as_posix()
+
         return normalized, target
