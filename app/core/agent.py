@@ -277,6 +277,38 @@ class Agent:
                 tool_call_count=len(message.tool_calls or []),
             )
 
+            rerun_target = safety.pending_test_rerun_target()
+            if (
+                rerun_target is not None
+                and message.tool_calls
+                and not any(
+                    call.function.name == "run_tests" for call in message.tool_calls
+                )
+            ):
+                trace.record(
+                    "test_rerun_required",
+                    request_id=request_id,
+                    test_target=rerun_target,
+                    repair_attempts=safety.test_repair_attempts,
+                    deferred_tool_calls=[
+                        call.function.name for call in message.tool_calls
+                    ],
+                    reason="测试失败后的实际修改必须先重跑验证。",
+                )
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "上一轮测试失败后的代码修改尚未验证。"
+                            "本轮非测试工具调用已被控制层暂缓；"
+                            "下一步只能调用 run_tests "
+                            f"重新运行测试目标 `{rerun_target}`。"
+                            "请勿继续读取、编辑或创建旁路文件。"
+                        ),
+                    }
+                )
+                continue
+
             # 没有工具调用，说明模型准备直接回复用户。
             if not message.tool_calls:
                 answer = message.content or "任务结束，但模型没有提供文字总结。"
