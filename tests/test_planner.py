@@ -63,3 +63,18 @@ def test_planner_does_not_create_number_or_heading_steps():
 
     assert all(step.objective not in {"完成：1", "完成：2"} for step in plan.steps)
     assert all("calculator.py" in step.objective or "pytest" in step.objective for step in plan.steps)
+
+
+def test_regression_task_plans_test_execution_without_test_authoring():
+    """验证只要求回归测试的修复任务不会被误规划成编写测试。"""
+    task = (
+        "检查 calculator.py 和 calculator_history.py，修复循环导入问题。"
+        "不要修改测试断言。修复后运行完整回归测试，只有测试通过才能完成。"
+    )
+
+    plan = create_task_plan(task, decision=judge_task_complexity(task))
+    objectives = tuple(step.objective for step in plan.steps)
+
+    assert any("实现或修改" in objective for objective in objectives)
+    assert any("运行指定测试" in objective for objective in objectives)
+    assert not any("编写或补充测试" in objective for objective in objectives)
