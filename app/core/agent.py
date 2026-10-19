@@ -336,6 +336,32 @@ class Agent:
                             return decision.reason
                         unresolved_test = safety.unresolved_test_reason()
                         if unresolved_test is not None:
+                            rerun_target = safety.pending_test_rerun_target()
+                            if rerun_target is not None:
+                                trace.record(
+                                    "test_rerun_required",
+                                    completion_check_id=completion_check_id,
+                                    request_id=request_id,
+                                    test_target=rerun_target,
+                                    repair_attempts=safety.test_repair_attempts,
+                                    reason="测试失败后的代码修改尚未经过测试验证。",
+                                )
+                                messages.append(
+                                    {"role": "assistant", "content": answer}
+                                )
+                                messages.append(
+                                    {
+                                        "role": "system",
+                                        "content": (
+                                            "上一轮测试失败后已经产生实际代码修改，"
+                                            "这些修改尚未验证。现在必须调用 run_tests "
+                                            f"重新运行测试目标 `{rerun_target}`；"
+                                            "不得直接总结或结束任务。根据重跑结果继续修复，"
+                                            "或在修复次数达到上限时报告未完成。"
+                                        ),
+                                    }
+                                )
+                                continue
                             trace.record(
                                 "task_stopped",
                                 reason="unresolved_test_failure",
