@@ -45,6 +45,9 @@ class TaskSafetySession:
         self.test_runs = 0
         self.mutation_generation = 0
         self.last_test_generation: int | None = None
+        self.last_failed_test_key: str | None = None
+        self.last_failed_test_generation: int | None = None
+        self.last_failed_test_error: str | None = None
         self._completed_mutations: dict[str, ToolResult] = {}
 
     @staticmethod
@@ -84,6 +87,56 @@ class TaskSafetySession:
             raise TaskConstraintViolation(
                 "用户任务明确禁止创建、修改或删除文件，已拒绝该工具调用。"
             )
+
+    def test_rerun_block_reason(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> str | None:
+        """在同一失败测试没有实际代码变更时拒绝原样重跑。"""
+        if tool_name != "run_tests" or self.last_failed_test_key is None:
+            return None
+        if self._test_key(arguments) != self.last_failed_test_key:
+            return None
+        if self.last_failed_test_generation is None:
+            return None
+        if self.mutation_generation > self.last_failed_test_generation:
+            return None
+        return (
+            "同一测试上次失败后没有检测到新的文件修改，已拒绝无效重跑。"
+            "请先根据失败证据修改相关代码；若测试与用户约束冲突或无法安全修复，"
+            "请明确结束为未完成并报告真实失败原因。"
+        )
+
+    @staticmethod
+    def _test_key(arguments: dict[str, Any]) -> str:
+        """将测试参数规范化为稳定键，用于识别同一测试目标。"""
+        return json.dumps(arguments, ensure_ascii=False, sort_keys=True)
+
+    def record_mutation_applied(self) -> None:
+        """仅在工具确实改变磁盘状态后推进修改代次。"""
+        self.mutation_generation += 1
+
+    def unresolved_test_reason(self) -> str | None:
+        """返回最新未解决测试失败的确定性停止原因。"""
+        if self.last_failed_test_error is None:
+            return None
+        lines = [line.strip() for line in self.last_failed_test_error.splitlines()]
+        error_kind = next(
+            (
+                line.removeprefix("测试错误类型：")
+                for line in lines
+                if line.startswith("测试错误类型：")
+            ),
+            "未分类错误",
+        )
+        failed_case = next(
+            (line for line in lines if line.startswith("FAILED ")),
+            None,
+        )
+        details = f"{error_kind}；{failed_case}" if failed_case else error_kind
+        return (
+            f"最新回归测试仍然失败（{details}），任务未完成；"
+            "已保留当前有效代码修改和完整测试证据。"
+        )
 
     def completed_mutation(
         self, tool_name: str, arguments: dict[str, Any]
@@ -163,7 +216,6 @@ class TaskSafetySession:
 
         paths: list[str] = []
         if tool_name in FILE_MUTATION_TOOLS:
-            self.mutation_generation += 1
             path = arguments.get("path")
             if isinstance(path, str):
                 self.change_set.touch(path)
@@ -188,6 +240,7 @@ class TaskSafetySession:
         result: ToolResult,
         *,
         plan_failed: bool = False,
+        arguments: dict[str, Any] | None = None,
     ) -> RecoveryDecision:
         """结合工具结果、净变化和计划状态生成恢复决策。"""
         if result.status is ToolStatus.FAILURE:
@@ -216,6 +269,19 @@ class TaskSafetySession:
             ):
                 self.test_repair_attempts += 1
             self.last_test_generation = self.mutation_generation
+
+            test_key = self._test_key(arguments or {})
+            if result.status is ToolStatus.FAILURE:
+                self.last_failed_test_key = test_key
+                self.last_failed_test_generation = self.mutation_generation
+                self.last_failed_test_error = result.error or "测试执行失败"
+            elif (
+                result.status is ToolStatus.SUCCESS
+                and test_key == self.last_failed_test_key
+            ):
+                self.last_failed_test_key = None
+                self.last_failed_test_generation = None
+                self.last_failed_test_error = None
 
         if tool_name == "run_tests" and result.status is ToolStatus.FAILURE:
             message = result.error or ""
