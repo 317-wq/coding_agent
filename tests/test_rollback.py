@@ -37,6 +37,7 @@ def _changes(tmp_path: Path):
 
 
 def test_approved_rollback_restores_created_modified_and_deleted(tmp_path: Path):
+    """验证授权回滚后磁盘内容与净变更摘要都恢复到初始状态。"""
     changes = _changes(tmp_path)
     authorizer = StubAuthorizer(AuthorizationDecision.allow())
 
@@ -53,7 +54,12 @@ def test_approved_rollback_restores_created_modified_and_deleted(tmp_path: Path)
     assert (tmp_path / "existing.txt").stat().st_mode & 0o777 == 0o640
     assert (tmp_path / "removed.txt").read_text(encoding="utf-8") == "restore"
     assert not (tmp_path / "created.txt").exists()
-    assert changes.summary().changes == ()
+    summary = changes.summary()
+    assert summary.changes == ()
+    assert summary.net_changed_count == 0
+    assert summary.modified_paths == ()
+    assert summary.unchanged_count == 3
+    assert summary.to_dict()["comparison_basis"] == "task_initial_state"
     assert json.loads(result.to_json()) == result.to_dict()
 
 
@@ -99,9 +105,7 @@ def test_change_during_authorization_is_reported_as_conflict(tmp_path: Path):
     def external_change():
         (tmp_path / "existing.txt").write_text("external", encoding="utf-8")
 
-    authorizer = StubAuthorizer(
-        AuthorizationDecision.allow(), callback=external_change
-    )
+    authorizer = StubAuthorizer(AuthorizationDecision.allow(), callback=external_change)
     result = AuthorizedRollback(changes, authorizer).execute()
 
     assert result.status is RollbackStatus.CONFLICT
