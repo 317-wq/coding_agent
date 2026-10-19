@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from app.core.result_aggregator import TaskResultAggregator
 from app.core.task_result import (
     ChangeSummary,
     FinalVerificationSummary,
@@ -16,6 +17,7 @@ from app.core.task_result import (
 from app.core.task_result import (
     TestEvidenceStatus as EvidenceStatus,
 )
+from app.runtime.trace import ExecutionTrace
 
 
 def test_task_result_serializes_changes_tests_and_recovery():
@@ -73,6 +75,23 @@ def test_task_result_supports_blocked_and_not_run_test():
 
     assert result.completed is False
     assert result.to_dict()["status"] == "blocked"
+
+
+def test_cancelled_rollback_is_not_an_unresolved_file_failure():
+    """验证用户拒绝回滚表示保留修改，而不是回滚执行失败。"""
+    trace = ExecutionTrace()
+    trace.record(
+        "rollback_finished",
+        status="cancelled",
+        pending_paths=("kept.py",),
+    )
+    trace.record(
+        "rollback_finished",
+        status="failed",
+        pending_paths=("unresolved.py",),
+    )
+
+    assert TaskResultAggregator._unresolved_paths(trace) == ("unresolved.py",)
 
 
 @pytest.mark.parametrize(
