@@ -92,6 +92,15 @@ def test_agent_rolls_back_and_replans_after_failed_mutation(
     events = agent.last_trace.get_events()
     snapshot = next(event for event in events if event["event"] == "snapshot_created")
     mutation = next(event for event in events if event["event"] == "mutation_applied")
+    recovery_event = next(
+        event
+        for event in events
+        if event["event"] == "recovery_decided"
+        and event["details"]["action"] == "suggest_rollback"
+    )
+    rollback_event = next(
+        event for event in events if event["event"] == "rollback_finished"
+    )
     rollback_summary = [
         event
         for event in events
@@ -101,6 +110,14 @@ def test_agent_rolls_back_and_replans_after_failed_mutation(
     assert snapshot["details"]["paths"] == ["module.py"]
     assert mutation["details"]["tool_status"] == "failure"
     assert mutation["details"]["net_change"] is True
+    assert recovery_event["details"]["tool_call_id"] == "edit"
+    assert recovery_event["details"]["recovery_id"] == "recovery-edit"
+    assert rollback_event["details"]["recovery_id"] == "recovery-edit"
+    assert not any(
+        event["event"] == "recovery_decided"
+        and event["details"]["action"] == "continue"
+        for event in events
+    )
     assert rollback_summary["details"]["comparison_basis"] == "task_initial_state"
     assert rollback_summary["details"]["net_changed_count"] == 0
     assert rollback_summary["details"]["modified_paths"] == []
