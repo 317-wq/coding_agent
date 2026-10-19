@@ -222,7 +222,8 @@ class Agent:
 
         for step in range(1, self.max_steps + 1):
             print(f"\n[Agent] 第 {step}/{self.max_steps} 轮")
-            trace.record("model_request_started", step=step)
+            request_id = f"model-{step}"
+            trace.record("model_request_started", step=step, request_id=request_id)
 
             try:
                 response = self.model.chat(
@@ -234,25 +235,33 @@ class Agent:
                     "task_stopped",
                     reason="user_interrupted",
                     step=step,
+                    request_id=request_id,
                 )
                 raise
             except Exception as exc:  # noqa: BLE001 - model boundary
                 trace.record(
                     "model_request_failed",
                     step=step,
+                    request_id=request_id,
                     error=str(exc),
                 )
                 trace.record(
                     "task_failed",
                     reason="model_request_failed",
+                    request_id=request_id,
                 )
                 return f"模型请求失败：{exc}"
 
             if not response.choices:
-                trace.record("model_response_empty", step=step)
+                trace.record(
+                    "model_response_empty",
+                    step=step,
+                    request_id=request_id,
+                )
                 trace.record(
                     "task_failed",
                     reason="empty_model_response",
+                    request_id=request_id,
                 )
                 return "模型没有返回任何候选响应。"
 
@@ -261,6 +270,7 @@ class Agent:
             trace.record(
                 "model_response_received",
                 step=step,
+                request_id=request_id,
                 has_tool_calls=bool(message.tool_calls),
                 tool_call_count=len(message.tool_calls or []),
             )
@@ -269,6 +279,7 @@ class Agent:
             if not message.tool_calls:
                 answer = message.content or "任务结束，但模型没有提供文字总结。"
                 if self.last_context is not None:
+                    completion_check_id = f"completion-{step}"
                     if self.last_plan is not None:
                         decision = verify_completion(
                             self.last_context.context.plan or self.last_plan,
@@ -282,6 +293,8 @@ class Agent:
                         )
                     trace.record(
                         "completion_checked",
+                        completion_check_id=completion_check_id,
+                        request_id=request_id,
                         status=decision.status.value,
                         completed=decision.completed,
                         reason=decision.reason,
@@ -294,6 +307,7 @@ class Agent:
                     )
                     trace.record(
                         "requirements_checked",
+                        completion_check_id=completion_check_id,
                         passed=requirement_check.passed,
                         missing=requirement_check.missing,
                     )
@@ -315,17 +329,21 @@ class Agent:
                                 "task_stopped",
                                 reason="validation_incomplete",
                                 error=decision.reason,
+                                completion_check_id=completion_check_id,
                             )
                             return decision.reason
                         recovery = safety.observe_completion(decision.status)
                         self.last_recovery_decision = recovery
-                        trace.record(
-                            "recovery_decided",
-                            action=recovery.action.value,
-                            reason=recovery.reason,
-                            triggers=recovery.triggers,
-                            recoverable_paths=recovery.recoverable_paths,
-                        )
+                        if recovery.action is not RecoveryAction.CONTINUE:
+                            trace.record(
+                                "recovery_decided",
+                                recovery_id=f"recovery-{completion_check_id}",
+                                completion_check_id=completion_check_id,
+                                action=recovery.action.value,
+                                reason=recovery.reason,
+                                triggers=recovery.triggers,
+                                recoverable_paths=recovery.recoverable_paths,
+                            )
                         if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
                             if rollback_denied:
                                 reason = (
@@ -333,11 +351,15 @@ class Agent:
                                     "请确认是否继续执行后续修复。"
                                 )
                                 trace.record(
-                                    "user_confirmation_required", reason=reason
+                                    "user_confirmation_required",
+                                    reason=reason,
+                                    completion_check_id=completion_check_id,
                                 )
                                 return reason
                             trace.record(
                                 "rollback_authorization_requested",
+                                recovery_id=f"recovery-{completion_check_id}",
+                                completion_check_id=completion_check_id,
                                 paths=recovery.recoverable_paths,
                                 reason=recovery.reason,
                             )
@@ -346,6 +368,8 @@ class Agent:
                             ).execute()
                             trace.record(
                                 "rollback_finished",
+                                recovery_id=f"recovery-{completion_check_id}",
+                                completion_check_id=completion_check_id,
                                 status=rollback.status.value,
                                 reason=rollback.reason,
                                 restored_paths=rollback.restored_paths,
@@ -387,11 +411,17 @@ class Agent:
                                         task, project_snapshot, self.last_plan
                                     )
                                     continue
-                                trace.record("task_stopped", reason=reason)
+                                trace.record(
+                                    "task_stopped",
+                                    reason=reason,
+                                    completion_check_id=completion_check_id,
+                                )
                                 return reason
                             post_rollback = safety.change_set.summary()
                             trace.record(
                                 "change_set_updated",
+                                recovery_id=f"recovery-{completion_check_id}",
+                                completion_check_id=completion_check_id,
                                 comparison_basis="task_initial_state",
                                 reason="rollback_verified",
                                 touched_count=post_rollback.touched_count,
@@ -427,7 +457,11 @@ class Agent:
                             )
                             continue
                         if recovery.action is RecoveryAction.STOP:
-                            trace.record("task_stopped", reason=recovery.reason)
+                            trace.record(
+                                "task_stopped",
+                                reason=recovery.reason,
+                                completion_check_id=completion_check_id,
+                            )
                             return recovery.reason
                         messages.append({"role": "assistant", "content": answer})
                         messages.append(
@@ -439,7 +473,11 @@ class Agent:
                             }
                         )
                         continue
-                trace.record("task_completed", answer=answer)
+                trace.record(
+                    "task_completed",
+                    answer=answer,
+                    request_id=request_id,
+                )
                 print("\n[Agent] 任务结束")
                 return answer
 
@@ -473,6 +511,7 @@ class Agent:
                         "task_stopped",
                         reason="max_tool_calls",
                         limit=self.max_tool_calls,
+                        request_id=request_id,
                     )
                     return reason
 
@@ -494,6 +533,7 @@ class Agent:
                         if self.last_context.context.truncated_count > before_trim:
                             trace.record(
                                 "context_trimmed",
+                                tool_call_id=tool_call.id,
                                 truncated_count=(
                                     self.last_context.context.truncated_count
                                 ),
@@ -501,6 +541,8 @@ class Agent:
                     trace.record(
                         "tool_arguments_invalid",
                         tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
                         status=tool_result.status.value,
                         error=str(exc),
                     )
@@ -522,6 +564,7 @@ class Agent:
                     tool=tool_name,
                     arguments=arguments,
                     tool_call_id=tool_call.id,
+                    request_id=request_id,
                 )
                 print(
                     f"[Tool] {tool_name}({json.dumps(arguments, ensure_ascii=False)})"
@@ -535,12 +578,14 @@ class Agent:
                         tool=tool_name,
                         arguments=arguments,
                         tool_call_id=tool_call.id,
+                        request_id=request_id,
                         reason="相同写操作已成功完成，复用先前结果。",
                     )
                     trace.record(
                         "tool_call_finished",
                         tool=tool_name,
                         tool_call_id=tool_call.id,
+                        request_id=request_id,
                         status=cached_result.status.value,
                         result=cached_result.result,
                         error=cached_result.error,
@@ -572,13 +617,37 @@ class Agent:
                         "task_stopped",
                         reason="user_interrupted",
                         tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
                     )
                     raise
                 except TaskConstraintViolation as exc:
+                    tool_result = ToolResult.cancelled(str(exc))
+                    tool_call_count += 1
+                    trace.record(
+                        "safety_rejected",
+                        rejection_type="user_constraint",
+                        tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        reason=str(exc),
+                    )
+                    trace.record(
+                        "tool_call_finished",
+                        tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        status=tool_result.status.value,
+                        result=tool_result.result,
+                        error=tool_result.error,
+                        rejected=True,
+                    )
                     trace.record(
                         "task_stopped",
                         reason="user_constraint_violation",
                         error=str(exc),
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
                     )
                     return str(exc)
                 except Exception as exc:  # noqa: BLE001 - tool boundary
@@ -602,6 +671,8 @@ class Agent:
                     trace.record(
                         "snapshot_created",
                         tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
                         paths=changed_snapshot_paths,
                         purpose="rollback_baseline",
                     )
@@ -613,6 +684,8 @@ class Agent:
                         "mutation_applied",
                         tool=tool_name,
                         path=arguments.get("path"),
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
                         tool_status=tool_result.status.value,
                         net_change=any(
                             path in post_tool_changes_by_path
@@ -626,18 +699,49 @@ class Agent:
                 ):
                     reason = tool_result.error or "工具访问违反工作区安全边界。"
                     trace.record(
+                        "safety_rejected",
+                        rejection_type="workspace_boundary",
+                        tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        reason=reason,
+                    )
+                    trace.record(
+                        "tool_call_finished",
+                        tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        status=tool_result.status.value,
+                        result=tool_result.result,
+                        error=tool_result.error,
+                        rejected=True,
+                    )
+                    trace.record(
                         "task_stopped",
                         reason="workspace_boundary_violation",
                         error=reason,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
                     )
                     return reason
 
                 if tool_result.status is ToolStatus.FAILURE and safety.validation_only:
                     reason = tool_result.error or "验收工具执行失败，已停止继续探索。"
                     trace.record(
+                        "tool_call_finished",
+                        tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        status=tool_result.status.value,
+                        result=tool_result.result,
+                        error=tool_result.error,
+                    )
+                    trace.record(
                         "task_stopped",
                         reason="validation_failure",
                         error=reason,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
                     )
                     return reason
 
@@ -651,6 +755,7 @@ class Agent:
                     if self.last_context.context.truncated_count > before_trim:
                         trace.record(
                             "context_trimmed",
+                            tool_call_id=tool_call.id,
                             truncated_count=self.last_context.context.truncated_count,
                         )
                 if state_manager is not None:
@@ -684,6 +789,7 @@ class Agent:
                         )
                         trace.record(
                             "plan_step_status_changed",
+                            tool_call_id=tool_call.id,
                             step_id=current,
                             status=updated_step.status.value,
                         )
@@ -710,6 +816,8 @@ class Agent:
                 change_summary = safety.change_set.summary()
                 trace.record(
                     "change_set_updated",
+                    tool_call_id=tool_call.id,
+                    request_id=request_id,
                     comparison_basis="task_initial_state",
                     touched_count=change_summary.touched_count,
                     unchanged_count=change_summary.unchanged_count,
@@ -719,18 +827,24 @@ class Agent:
                     modified_paths=change_summary.modified_paths,
                     deleted_paths=change_summary.deleted_paths,
                 )
-                trace.record(
-                    "recovery_decided",
-                    action=recovery.action.value,
-                    reason=recovery.reason,
-                    triggers=recovery.triggers,
-                    recoverable_paths=recovery.recoverable_paths,
-                )
+                recovery_id = f"recovery-{tool_call.id}"
+                if recovery.action is not RecoveryAction.CONTINUE:
+                    trace.record(
+                        "recovery_decided",
+                        recovery_id=recovery_id,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        action=recovery.action.value,
+                        reason=recovery.reason,
+                        triggers=recovery.triggers,
+                        recoverable_paths=recovery.recoverable_paths,
+                    )
 
                 trace.record(
                     "tool_call_finished",
                     tool=tool_name,
                     tool_call_id=tool_call.id,
+                    request_id=request_id,
                     status=tool_result.status.value,
                     result=tool_result.result,
                     error=tool_result.error,
@@ -752,10 +866,17 @@ class Agent:
                         reason = (
                             "用户拒绝回滚，当前修改已保留；请确认是否继续执行后续修复。"
                         )
-                        trace.record("user_confirmation_required", reason=reason)
+                        trace.record(
+                            "user_confirmation_required",
+                            reason=reason,
+                            recovery_id=recovery_id,
+                            tool_call_id=tool_call.id,
+                        )
                         return reason
                     trace.record(
                         "rollback_authorization_requested",
+                        recovery_id=recovery_id,
+                        tool_call_id=tool_call.id,
                         paths=recovery.recoverable_paths,
                         reason=recovery.reason,
                     )
@@ -764,6 +885,8 @@ class Agent:
                     ).execute()
                     trace.record(
                         "rollback_finished",
+                        recovery_id=recovery_id,
+                        tool_call_id=tool_call.id,
                         status=rollback.status.value,
                         reason=rollback.reason,
                         restored_paths=rollback.restored_paths,
@@ -798,12 +921,19 @@ class Agent:
                                 task, project_snapshot, self.last_plan
                             )
                             break
-                        trace.record("task_stopped", reason=reason)
+                        trace.record(
+                            "task_stopped",
+                            reason=reason,
+                            recovery_id=recovery_id,
+                            tool_call_id=tool_call.id,
+                        )
                         return reason
 
                     post_rollback = safety.change_set.summary()
                     trace.record(
                         "change_set_updated",
+                        recovery_id=recovery_id,
+                        tool_call_id=tool_call.id,
                         comparison_basis="task_initial_state",
                         reason="rollback_verified",
                         touched_count=post_rollback.touched_count,
@@ -855,7 +985,12 @@ class Agent:
                     break
 
                 if recovery.action is RecoveryAction.STOP:
-                    trace.record("task_stopped", reason=recovery.reason)
+                    trace.record(
+                        "task_stopped",
+                        reason=recovery.reason,
+                        recovery_id=recovery_id,
+                        tool_call_id=tool_call.id,
+                    )
                     return recovery.reason
 
                 # 批次采用失败关闭规则：失败或取消后均停止剩余调用，
@@ -864,6 +999,8 @@ class Agent:
                     trace.record(
                         "tool_batch_aborted",
                         tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
                         status=tool_result.status.value,
                         skipped_calls=len(message.tool_calls) - call_index - 1,
                     )
