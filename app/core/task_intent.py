@@ -23,6 +23,7 @@ def is_validation_only_task(task: str) -> bool:
     if not isinstance(task, str) or not task.strip():
         return False
     affirmative_task = _NEGATED_DEVELOPMENT_PATTERN.sub("", task)
+    affirmative_task = re.sub(r"自动修复次数", "恢复统计", affirmative_task)
     if _DEVELOPMENT_ACTION_PATTERN.search(affirmative_task):
         return False
     return bool(_VALIDATION_SUBJECT_PATTERN.search(affirmative_task))
