@@ -46,6 +46,20 @@ def test_development_task_with_acceptance_section_is_not_validation_only(tmp_pat
     assert session.validation_only is False
 
 
+def test_read_only_final_acceptance_is_validation_only(tmp_path):
+    """验证带否定开发约束的最终验收使用轻量一次性执行路径。"""
+    task = (
+        "对当前项目执行最终验收，只列出文件并运行完整测试，"
+        "不逐个读取文件，不修改代码。"
+    )
+
+    decision = judge_task_complexity(task)
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path), task=task)
+
+    assert decision.requires_planning is False
+    assert session.validation_only is True
+
+
 def test_validation_failure_stops_without_repeating_tests(monkeypatch, tmp_path):
     """验证验收测试失败后只执行一次，不再运行其他测试或重规划。"""
     calls: list[str] = []
