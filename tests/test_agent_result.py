@@ -94,7 +94,7 @@ def test_agent_returns_failure_json_and_stops_current_tool_batch(
     assert finished["details"]["error"] == "boom"
 
 
-def test_agent_returns_cancelled_json_and_continues(monkeypatch, tmp_path: Path):
+def test_agent_returns_cancelled_json_and_blocks_completion(monkeypatch, tmp_path: Path):
     registry = ToolRegistry()
     registry.register(
         make_spec("cancel", lambda: ToolResult.cancelled("用户取消"))
@@ -117,6 +117,36 @@ def test_agent_returns_cancelled_json_and_continues(monkeypatch, tmp_path: Path)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
     assert agent.run("测试取消") == "完成判定已阻塞且没有可恢复变更，停止当前执行。"
+
+
+def test_cancelled_tool_stops_remaining_calls_in_batch(monkeypatch, tmp_path: Path):
+    """验证批次中工具取消后不执行其后的工具调用。"""
+    executions = []
+    registry = ToolRegistry()
+    registry.register(make_spec("cancel", lambda: ToolResult.cancelled("用户取消")))
+    registry.register(make_spec("second", lambda: executions.append("second") or "ok"))
+
+    class FakeModel:
+        requests = 0
+
+        def chat(self, messages, tools):
+            self.requests += 1
+            if self.requests == 1:
+                return make_response(
+                    tool_calls=[
+                        make_tool_call("cancel", "call-1"),
+                        make_tool_call("second", "call-2"),
+                    ]
+                )
+            return make_response(content="已停止")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+    agent.run("测试批次取消")
+
+    assert executions == []
+    aborted = [event for event in agent.last_trace.get_events() if event["event"] == "tool_batch_aborted"]
+    assert aborted[0]["details"]["skipped_calls"] == 1
 
 
 def test_agent_returns_structured_json_for_invalid_arguments(
