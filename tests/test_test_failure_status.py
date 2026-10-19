@@ -114,6 +114,21 @@ def test_list_and_run_tests_preserve_exact_python_filename(tmp_path: Path):
     assert "测试结果：通过" in result
 
 
+def test_run_tests_accepts_pytest_node_id(tmp_path: Path):
+    """验证测试工具保留文件路径并支持精确到用例的 pytest node id。"""
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+    target = tmp_path / "test_sample.py"
+    target.write_text(
+        "class TestSample:\n    def test_ok(self):\n        assert True\n",
+        encoding="utf-8",
+    )
+
+    result = tools.run_tests("test_sample.py::TestSample::test_ok")
+
+    assert "测试目标：test_sample.py::TestSample::test_ok" in result
+    assert "测试退出码：0" in result
+
+
 def test_edit_file_is_idempotent_when_target_content_already_exists(tmp_path: Path):
     """验证重复执行相同文本替换不会返回失败。"""
     tools.set_workspace(WorkspaceContext.from_path(tmp_path))
