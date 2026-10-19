@@ -393,3 +393,66 @@ def test_agent_keeps_step_limit(monkeypatch, tmp_path: Path):
     agent = Agent(WorkspaceContext.from_path(tmp_path), max_steps=1, registry=registry)
 
     assert agent.run("测试轮数上限").startswith("已达到最大执行轮数 1")
+
+
+def test_final_report_uses_disk_and_trace_instead_of_model_claims(
+    monkeypatch, tmp_path: Path
+):
+    """验证最终报告不会采信与实际文件及调用记录冲突的模型总结。"""
+    registry = ToolRegistry()
+
+    def create_file(path, content):
+        """在测试工作区实际创建文件。"""
+        (tmp_path / path).write_text(content, encoding="utf-8")
+        return "创建成功"
+
+    registry.register(
+        ToolSpec(
+            "create_file",
+            "创建文件",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+            create_file,
+        )
+    )
+
+    class FakeModel:
+        requests = 0
+
+        def chat(self, messages, tools):
+            """先调用创建工具，再返回与事实冲突的自由文本。"""
+            self.requests += 1
+            if self.requests == 1:
+                return make_response(
+                    tool_calls=[
+                        make_tool_call(
+                            "create_file",
+                            "create-1",
+                            '{"path":"result.txt","content":"real"}',
+                        )
+                    ]
+                )
+            return make_response(content="没有修改文件，也没有调用工具")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    agent.run("创建 result.txt")
+
+    result = agent.last_result
+    assert result is not None
+    assert result.changes.created == ("result.txt",)
+    assert result.tool_calls.calls_started == 1
+    assert result.tool_calls.calls_finished == 1
+    assert result.tool_calls.succeeded == 1
+    assert result.trace_event_count == len(agent.last_trace.events)
+    assert result.final_verification.verified is True
+    assert result.final_verification.verified_path_count == 1
+    assert agent.last_trace.events[-1]["event"] == "final_state_verified"
