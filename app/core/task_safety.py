@@ -206,25 +206,29 @@ class TaskSafetySession:
         recoverable_paths = tuple(change.path for change in summary.changes)
         test_error_kind = None
         test_failed = False
-        if tool_name == "run_tests" and result.status is ToolStatus.FAILURE:
+        if tool_name == "run_tests":
             self.test_runs += 1
-            message = result.error or ""
-            if "测试错误类型：收集冲突" in message:
-                test_error_kind = "collection"
-            elif "测试错误类型：环境错误" in message:
-                test_error_kind = "environment"
-            elif "测试错误类型：测试代码" in message:
-                test_error_kind = "test_code"
-            else:
-                test_failed = True
-            # 第一次运行测试只是建立基线，不算自动修复；只有修改后再次运行
-            # 才增加修复尝试次数。
+            # 首次运行只建立失败基线；之后每次“修改代码后重跑”都算一次
+            # 自动修复尝试，无论重跑最终通过还是失败。
             if (
                 self.last_test_generation is not None
                 and self.mutation_generation > self.last_test_generation
             ):
                 self.test_repair_attempts += 1
             self.last_test_generation = self.mutation_generation
+
+        if tool_name == "run_tests" and result.status is ToolStatus.FAILURE:
+            message = result.error or ""
+            if "测试错误类型：收集冲突" in message:
+                test_error_kind = "collection"
+            elif "测试错误类型：环境错误" in message:
+                test_error_kind = "environment"
+            elif "测试错误类型：代码导入错误" in message:
+                test_error_kind = "import"
+            elif "测试错误类型：测试代码" in message:
+                test_error_kind = "test_code"
+            else:
+                test_failed = True
         return self.policy.decide(
             RecoverySignals(
                 consecutive_tool_failures=self.consecutive_tool_failures,
