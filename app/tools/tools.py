@@ -561,17 +561,23 @@ def run_tests(test_path: str = ".") -> str:
         if result.returncode != 0:
             lowered = output.lower()
             if (
-                "import file mismatch" in lowered
-                or "error collecting" in lowered
-                or "importerror while importing test module" in lowered
-            ):
-                error_kind = "测试错误类型：收集冲突\n"
-            elif (
                 "no module named pytest" in lowered
                 or "timeout" in lowered
                 or "测试执行失败" in lowered
             ):
                 error_kind = "测试错误类型：环境错误\n"
+            elif (
+                "partially initialized module" in lowered
+                or "most likely due to a circular import" in lowered
+                or "importerror:" in lowered
+                or "modulenotfounderror:" in lowered
+            ):
+                error_kind = "测试错误类型：代码导入错误\n"
+            elif (
+                "import file mismatch" in lowered
+                or "error collecting" in lowered
+            ):
+                error_kind = "测试错误类型：收集冲突\n"
             elif "nameerror" in lowered or "syntaxerror" in lowered:
                 error_kind = "测试错误类型：测试代码\n"
             else:
