@@ -73,3 +73,19 @@ def test_list_files_accepts_workspace_absolute_path(tmp_path: Path):
 
     assert "calculator.py" in result
     assert not result.startswith("错误：")
+
+
+def test_list_and_run_tests_preserve_exact_python_filename(tmp_path: Path):
+    """验证列举和测试工具使用同一个带扩展名的规范相对路径。"""
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    target = tests / "test_completion_probe.py"
+    target.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    listing = tools.list_files("tests")
+    result = tools.run_tests(str(target))
+
+    assert "文件: tests/test_completion_probe.py" in listing
+    assert "测试目标：tests/test_completion_probe.py" in result
+    assert "测试结果：通过" in result
