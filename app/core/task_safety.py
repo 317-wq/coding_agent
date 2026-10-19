@@ -1,6 +1,7 @@
 """Agent Loop 使用的任务约束、变更会话和重复写入控制。"""
 
 import json
+from pathlib import PurePosixPath
 from typing import Any
 
 from app.core.completion import CompletionStatus
@@ -48,6 +49,7 @@ class TaskSafetySession:
         self.last_failed_test_key: str | None = None
         self.last_failed_test_generation: int | None = None
         self.last_failed_test_error: str | None = None
+        self._mutation_paths_since_test: set[str] = set()
         self._completed_mutations: dict[str, ToolResult] = {}
 
     @staticmethod
@@ -111,9 +113,25 @@ class TaskSafetySession:
         """将测试参数规范化为稳定键，用于识别同一测试目标。"""
         return json.dumps(arguments, ensure_ascii=False, sort_keys=True)
 
-    def record_mutation_applied(self) -> None:
-        """仅在工具确实改变磁盘状态后推进修改代次。"""
+    def record_mutation_applied(self, path: str | None = None) -> None:
+        """记录真实落盘修改及其路径，供测试重跑和修复预算判定。"""
         self.mutation_generation += 1
+        self._mutation_paths_since_test.add(path or "<unknown>")
+
+    @staticmethod
+    def _is_test_artifact(path: str) -> bool:
+        """判断修改路径是否属于测试代码而非被测业务实现。"""
+        normalized = path.replace("\\", "/")
+        parts = PurePosixPath(normalized).parts
+        name = parts[-1] if parts else normalized
+        return "tests" in parts or name.startswith("test_")
+
+    def _has_implementation_mutation_since_test(self) -> bool:
+        """判断上次测试后是否至少修改过一个非测试实现文件。"""
+        return any(
+            not self._is_test_artifact(path)
+            for path in self._mutation_paths_since_test
+        )
 
     def unresolved_test_reason(self) -> str | None:
         """返回最新未解决测试失败的确定性停止原因。"""
@@ -266,9 +284,11 @@ class TaskSafetySession:
             if (
                 self.last_test_generation is not None
                 and self.mutation_generation > self.last_test_generation
+                and self._has_implementation_mutation_since_test()
             ):
                 self.test_repair_attempts += 1
             self.last_test_generation = self.mutation_generation
+            self._mutation_paths_since_test.clear()
 
             test_key = self._test_key(arguments or {})
             if result.status is ToolStatus.FAILURE:
@@ -332,4 +352,5 @@ class TaskSafetySession:
         self.recovery_attempts += 1
         self.consecutive_tool_failures = 0
         self.change_set = TaskChangeSet(self.workspace)
+        self._mutation_paths_since_test.clear()
         self._completed_mutations.clear()
