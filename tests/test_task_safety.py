@@ -36,6 +36,24 @@ def test_prepare_directory_delete_captures_regular_files(tmp_path: Path):
     assert paths == ("package/nested/two.py", "package/one.py")
 
 
+def test_completed_edit_is_reused_only_while_target_state_matches(tmp_path: Path):
+    """验证写操作缓存会检查当前文件状态，避免复用过期结果。"""
+    target = tmp_path / "module.py"
+    target.write_text("return 43", encoding="utf-8")
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    arguments = {
+        "path": "module.py",
+        "old_text": "return 42",
+        "new_text": "return 43",
+    }
+    success = ToolResult.success("修改成功")
+    session.record_completed_mutation("edit_file", arguments, success)
+
+    assert session.completed_mutation("edit_file", arguments) == success
+    target.write_text("return 42", encoding="utf-8")
+    assert session.completed_mutation("edit_file", arguments) is None
+
+
 def test_observe_failure_uses_current_recoverable_paths(tmp_path: Path):
     target = tmp_path / "module.py"
     target.write_text("before", encoding="utf-8")
