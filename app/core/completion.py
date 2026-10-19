@@ -56,6 +56,23 @@ class CompletionVerifier:
     _SUCCESS_PATTERN = re.compile(
         r"通过|成功|passed|pass|success|ok", re.IGNORECASE
     )
+    _TEST_TARGET_PATTERN = re.compile(r"^测试目标：([^\n]+)", re.MULTILINE)
+
+    @classmethod
+    def _latest_test_results(cls, test_results: Sequence[str]) -> tuple[str, ...]:
+        """按测试目标保留最新结果，允许修复后的成功覆盖旧失败。"""
+        latest: dict[str, str] = {}
+        unkeyed: list[str] = []
+        for raw in test_results:
+            normalized = raw.strip()
+            if not normalized:
+                continue
+            match = cls._TEST_TARGET_PATTERN.search(normalized)
+            if match is None:
+                unkeyed.append(normalized)
+                continue
+            latest[match.group(1).strip()] = normalized
+        return (*unkeyed, *latest.values())
 
     def verify(
         self,
@@ -101,7 +118,7 @@ class CompletionVerifier:
                 evidence=failed_tools,
             )
 
-        normalized_tests = tuple(result.strip() for result in test_results if result.strip())
+        normalized_tests = self._latest_test_results(test_results)
         failed_tests = tuple(
             result for result in normalized_tests if self._FAILURE_PATTERN.search(result)
         )
@@ -163,7 +180,7 @@ class CompletionVerifier:
                 "存在失败或取消的工具结果。",
                 evidence=failures,
             )
-        normalized_tests = tuple(item.strip() for item in test_results if item.strip())
+        normalized_tests = self._latest_test_results(test_results)
         failed_tests = tuple(
             item for item in normalized_tests if self._FAILURE_PATTERN.search(item)
         )
