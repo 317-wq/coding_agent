@@ -123,6 +123,7 @@ def test_successful_rerun_after_mutation_counts_as_repair_attempt(tmp_path: Path
     )
     session.prepare_tool("edit_file", {"path": "module.py"})
     target.write_text("after", encoding="utf-8")
+    session.record_mutation_applied()
 
     decision = session.observe(
         "run_tests",
@@ -131,6 +132,30 @@ def test_successful_rerun_after_mutation_counts_as_repair_attempt(tmp_path: Path
 
     assert decision.action is RecoveryAction.CONTINUE
     assert session.test_repair_attempts == 1
+
+
+def test_same_failed_test_requires_real_mutation_before_rerun(tmp_path: Path):
+    """验证失败编辑不会放行同一测试，真实落盘修改才会放行。"""
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    arguments = {"test_path": "tests/"}
+    session.observe(
+        "run_tests",
+        ToolResult.failure(
+            "测试错误类型：断言失败\n测试结果：失败\n"
+            "FAILED tests/test_sample.py::test_value"
+        ),
+        arguments=arguments,
+    )
+
+    assert session.test_rerun_block_reason("run_tests", arguments) is not None
+
+    # prepare_tool 只建立快照；失败或未落盘的编辑不能算作修复。
+    session.prepare_tool("edit_file", {"path": "module.py"})
+    assert session.test_rerun_block_reason("run_tests", arguments) is not None
+
+    session.record_mutation_applied()
+    assert session.test_rerun_block_reason("run_tests", arguments) is None
+    assert "tests/test_sample.py::test_value" in session.unresolved_test_reason()
 
 
 def test_reset_after_recovery_starts_new_change_session(tmp_path: Path):
