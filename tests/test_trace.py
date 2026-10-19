@@ -41,6 +41,21 @@ def test_trace_keeps_unfinished_count_with_structured_results():
     assert trace.get_statistics()["tool_calls"]["unfinished"] == 1
 
 
+def test_trace_assigns_stable_id_and_monotonic_sequence():
+    """验证同一任务事件共享 Trace 标识并具有严格递增序号。"""
+    trace = ExecutionTrace(trace_id="trace-test")
+    trace.record("task_started")
+    trace.record("task_completed")
+
+    events = trace.get_events()
+    assert [event["trace_id"] for event in events] == [
+        "trace-test",
+        "trace-test",
+    ]
+    assert [event["sequence"] for event in events] == [1, 2]
+    assert trace.get_statistics()["trace_id"] == "trace-test"
+
+
 def test_trace_sanitizes_secrets_and_sensitive_file_paths():
     trace = ExecutionTrace()
     trace.record(
