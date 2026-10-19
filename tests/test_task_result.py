@@ -4,10 +4,16 @@ import pytest
 
 from app.core.task_result import (
     ChangeSummary,
+    FinalVerificationSummary,
     RecoveryRecord,
     TaskResult,
     TaskStatus,
+    ToolCallSummary,
+)
+from app.core.task_result import (
     TestEvidence as Evidence,
+)
+from app.core.task_result import (
     TestEvidenceStatus as EvidenceStatus,
 )
 
@@ -27,7 +33,23 @@ def test_task_result_serializes_changes_tests_and_recovery():
         ),
         recovery=(RecoveryRecord("continue", "首次测试失败后自动修复"),),
         repair_attempts=1,
+        model_request_count=3,
+        tool_calls=ToolCallSummary(
+            calls_started=2,
+            calls_finished=2,
+            succeeded=2,
+        ),
         trace_event_count=12,
+        final_verification=FinalVerificationSummary(
+            verified=True,
+            verified_path_count=2,
+            net_changed_count=2,
+            git_status="available",
+            git_dirty=True,
+            git_changed_count=2,
+            test_evidence_count=1,
+            evidence_sources=("file_content_hashes", "execution_trace"),
+        ),
     )
 
     payload = json.loads(result.to_json())
@@ -36,6 +58,9 @@ def test_task_result_serializes_changes_tests_and_recovery():
     assert payload["changes"]["created"] == ["calculator.py"]
     assert payload["tests"][0]["status"] == "passed"
     assert payload["recovery"][0]["action"] == "continue"
+    assert payload["model_request_count"] == 3
+    assert payload["tool_calls"]["succeeded"] == 2
+    assert payload["final_verification"]["verified"] is True
 
 
 def test_task_result_supports_blocked_and_not_run_test():
@@ -55,6 +80,8 @@ def test_task_result_supports_blocked_and_not_run_test():
     [
         lambda: TaskResult("", TaskStatus.COMPLETED),
         lambda: TaskResult("任务", TaskStatus.COMPLETED, repair_attempts=-1),
+        lambda: ToolCallSummary(calls_started=-1),
+        lambda: FinalVerificationSummary(net_changed_count=-1),
         lambda: ChangeSummary(created=("",)),
         lambda: Evidence("", EvidenceStatus.NOT_RUN),
         lambda: RecoveryRecord("", "原因"),
