@@ -106,3 +106,17 @@ def test_cancelled_tool_is_not_success_evidence_for_simple_task():
     )
     assert decision.status is CompletionStatus.BLOCKED
     assert decision.completed is False
+
+
+def test_latest_result_for_same_test_target_supersedes_old_failure():
+    """验证代码修复后的成功重跑可以覆盖同一目标的历史失败。"""
+    from app.core.completion import CompletionVerifier
+
+    decision = CompletionVerifier().verify_basic(
+        test_results=(
+            "测试目标：tests\n测试退出码：1\n测试结果：失败",
+            "测试目标：tests\n测试退出码：0\n测试结果：通过\n2 passed",
+        )
+    )
+
+    assert decision.status is CompletionStatus.COMPLETE
