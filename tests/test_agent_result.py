@@ -95,6 +95,88 @@ def test_agent_returns_failure_json_and_stops_current_tool_batch(
     assert finished["details"]["error"] == "boom"
 
 
+def test_replanned_task_can_complete_after_earlier_tool_failure(
+    monkeypatch, tmp_path: Path
+):
+    """验证已触发重规划的路径错误不会永久阻塞后续成功任务。"""
+    target = tmp_path / "module.py"
+    target.write_text("before", encoding="utf-8")
+    registry = ToolRegistry()
+    path_parameters = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+        "additionalProperties": False,
+    }
+
+    def read_file(path):
+        """模拟错误路径失败、正确路径成功的读取工具。"""
+        if path != "module.py":
+            return ToolResult.failure(f"文件不存在：{path}")
+        return target.read_text(encoding="utf-8")
+
+    def edit_file(path):
+        """模拟恢复计划中的真实文件修改。"""
+        target.write_text("after", encoding="utf-8")
+        return "修改成功"
+
+    registry.register(ToolSpec("read_file", "读取文件", path_parameters, read_file))
+    registry.register(ToolSpec("edit_file", "修改文件", path_parameters, edit_file))
+    registry.register(
+        ToolSpec(
+            "run_tests",
+            "运行测试",
+            {
+                "type": "object",
+                "properties": {"test_path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            lambda test_path=".": (
+                f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过"
+            ),
+        )
+    )
+
+    class FakeModel:
+        """依次制造路径错误、恢复执行并提交完成说明。"""
+
+        calls = 0
+
+        def chat(self, messages, tools):
+            """按恢复场景返回下一项工具调用。"""
+            self.calls += 1
+            calls = {
+                1: make_tool_call(
+                    "read_file", "wrong-read", '{"path":"src/module.py"}'
+                ),
+                2: make_tool_call(
+                    "read_file", "correct-read", '{"path":"module.py"}'
+                ),
+                3: make_tool_call(
+                    "edit_file", "repair-edit", '{"path":"module.py"}'
+                ),
+                4: make_tool_call(
+                    "run_tests", "passing-test", '{"test_path":"tests"}'
+                ),
+            }
+            if self.calls in calls:
+                return make_response(tool_calls=[calls[self.calls]])
+            return make_response(content="路径错误已恢复，修改和测试均已完成。")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    result = agent.run("读取配置，然后修改代码，然后运行测试")
+
+    assert result == "路径错误已恢复，修改和测试均已完成。"
+    assert target.read_text(encoding="utf-8") == "after"
+    assert agent.last_result.completed is True
+    assert not any(
+        event["event"] == "rollback_authorization_requested"
+        for event in agent.last_trace.get_events()
+    )
+
+
 def test_workspace_boundary_rejection_has_explicit_correlated_trace(
     monkeypatch, tmp_path: Path
 ):
