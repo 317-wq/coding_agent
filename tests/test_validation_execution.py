@@ -50,7 +50,7 @@ def test_read_only_final_acceptance_is_validation_only(tmp_path):
     """验证带否定开发约束的最终验收使用轻量一次性执行路径。"""
     task = (
         "对当前项目执行最终验收，只列出文件并运行完整测试，"
-        "不逐个读取文件，不修改代码。"
+        "不逐个读取文件，不修改代码，并报告自动修复次数。"
     )
 
     decision = judge_task_complexity(task)
