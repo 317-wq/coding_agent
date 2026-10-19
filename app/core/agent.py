@@ -4,9 +4,15 @@ import json
 
 from openai.types.chat import ChatCompletionMessageParam
 
-from app.core.completion import CompletionStatus, CompletionVerifier, verify_completion
+from app.core.completion import (
+    CompletionDecision,
+    CompletionStatus,
+    CompletionVerifier,
+    verify_completion,
+)
 from app.core.complexity import judge_task_complexity
 from app.core.context import ContextManager
+from app.core.final_verification import FinalStateVerifier
 from app.core.planner import TaskPlan, create_task_plan
 from app.core.recovery import RecoveryAction, RecoveryDecision
 from app.core.requirements import TaskRequirementVerifier
@@ -19,6 +25,7 @@ from app.runtime.model import ModelAdapter
 from app.runtime.trace import ExecutionTrace
 from app.runtime.workspace import WorkspaceContext
 from app.tools import set_workspace
+from app.tools.change_set import ChangeSetSummary
 from app.tools.git_repository import inspect_git_repository
 from app.tools.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from app.tools.result import ToolResult, ToolStatus
@@ -88,6 +95,8 @@ class Agent:
             answer = self._run_legacy(task)
         finally:
             self._build_task_result(task)
+            if self.last_trace is not None:
+                self._print_trace_summary(self.last_trace)
         return answer
 
     def _build_task_result(self, task: str) -> None:
@@ -99,9 +108,27 @@ class Agent:
         ):
             return
         try:
-            changes = self.last_change_set.summary()
+            final_evidence = FinalStateVerifier().verify(
+                self.workspace,
+                self.last_change_set,
+                self.last_trace,
+            )
         except Exception as exc:  # noqa: BLE001 - reporting boundary
-            self.last_trace.record("task_result_aggregation_failed", error=str(exc))
+            reason = f"最终状态核验失败：{exc}"
+            self.last_trace.record("final_state_verification_failed", error=str(exc))
+            self.last_result = TaskResultAggregator().aggregate(
+                self.last_context.context,
+                ChangeSetSummary(touched_count=0, unchanged_count=0, changes=()),
+                completion=CompletionDecision(CompletionStatus.BLOCKED, reason),
+                trace=self.last_trace,
+                recovery=self.last_recovery_decision,
+                repair_attempts=(
+                    self.last_safety.test_repair_attempts
+                    if self.last_safety is not None
+                    else 0
+                ),
+                task_status=TaskStatus.BLOCKED,
+            )
             return
         completion_status = None
         for event in reversed(self.last_trace.events):
@@ -116,11 +143,12 @@ class Agent:
         )
         self.last_result = TaskResultAggregator().aggregate(
             self.last_context.context,
-            changes,
+            final_evidence.changes,
             trace=self.last_trace,
             recovery=self.last_recovery_decision,
             repair_attempts=repair_attempts,
             task_status=task_status,
+            final_evidence=final_evidence,
         )
 
     def _run_legacy(self, task: str) -> str:
@@ -207,7 +235,6 @@ class Agent:
                     reason="user_interrupted",
                     step=step,
                 )
-                self._print_trace_summary(trace)
                 raise
             except Exception as exc:  # noqa: BLE001 - model boundary
                 trace.record(
@@ -219,7 +246,6 @@ class Agent:
                     "task_failed",
                     reason="model_request_failed",
                 )
-                self._print_trace_summary(trace)
                 return f"模型请求失败：{exc}"
 
             if not response.choices:
@@ -228,7 +254,6 @@ class Agent:
                     "task_failed",
                     reason="empty_model_response",
                 )
-                self._print_trace_summary(trace)
                 return "模型没有返回任何候选响应。"
 
             message = response.choices[0].message
@@ -291,7 +316,6 @@ class Agent:
                                 reason="validation_incomplete",
                                 error=decision.reason,
                             )
-                            self._print_trace_summary(trace)
                             return decision.reason
                         recovery = safety.observe_completion(decision.status)
                         self.last_recovery_decision = recovery
@@ -311,7 +335,6 @@ class Agent:
                                 trace.record(
                                     "user_confirmation_required", reason=reason
                                 )
-                                self._print_trace_summary(trace)
                                 return reason
                             trace.record(
                                 "rollback_authorization_requested",
@@ -365,7 +388,6 @@ class Agent:
                                     )
                                     continue
                                 trace.record("task_stopped", reason=reason)
-                                self._print_trace_summary(trace)
                                 return reason
                             post_rollback = safety.change_set.summary()
                             trace.record(
@@ -406,7 +428,6 @@ class Agent:
                             continue
                         if recovery.action is RecoveryAction.STOP:
                             trace.record("task_stopped", reason=recovery.reason)
-                            self._print_trace_summary(trace)
                             return recovery.reason
                         messages.append({"role": "assistant", "content": answer})
                         messages.append(
@@ -420,7 +441,6 @@ class Agent:
                         continue
                 trace.record("task_completed", answer=answer)
                 print("\n[Agent] 任务结束")
-                self._print_trace_summary(trace)
                 return answer
 
             # 保存模型的工具调用消息，供下一轮对话使用。
@@ -454,7 +474,6 @@ class Agent:
                         reason="max_tool_calls",
                         limit=self.max_tool_calls,
                     )
-                    self._print_trace_summary(trace)
                     return reason
 
                 tool_name = tool_call.function.name
@@ -554,7 +573,6 @@ class Agent:
                         reason="user_interrupted",
                         tool=tool_name,
                     )
-                    self._print_trace_summary(trace)
                     raise
                 except TaskConstraintViolation as exc:
                     trace.record(
@@ -562,7 +580,6 @@ class Agent:
                         reason="user_constraint_violation",
                         error=str(exc),
                     )
-                    self._print_trace_summary(trace)
                     return str(exc)
                 except Exception as exc:  # noqa: BLE001 - tool boundary
                     tool_result = ToolResult.failure(f"工具执行异常：{exc}")
@@ -613,7 +630,6 @@ class Agent:
                         reason="workspace_boundary_violation",
                         error=reason,
                     )
-                    self._print_trace_summary(trace)
                     return reason
 
                 if tool_result.status is ToolStatus.FAILURE and safety.validation_only:
@@ -623,7 +639,6 @@ class Agent:
                         reason="validation_failure",
                         error=reason,
                     )
-                    self._print_trace_summary(trace)
                     return reason
 
                 if self.last_context is not None:
@@ -738,7 +753,6 @@ class Agent:
                             "用户拒绝回滚，当前修改已保留；请确认是否继续执行后续修复。"
                         )
                         trace.record("user_confirmation_required", reason=reason)
-                        self._print_trace_summary(trace)
                         return reason
                     trace.record(
                         "rollback_authorization_requested",
@@ -785,7 +799,6 @@ class Agent:
                             )
                             break
                         trace.record("task_stopped", reason=reason)
-                        self._print_trace_summary(trace)
                         return reason
 
                     post_rollback = safety.change_set.summary()
@@ -843,7 +856,6 @@ class Agent:
 
                 if recovery.action is RecoveryAction.STOP:
                     trace.record("task_stopped", reason=recovery.reason)
-                    self._print_trace_summary(trace)
                     return recovery.reason
 
                 # 批次采用失败关闭规则：失败或取消后均停止剩余调用，
@@ -862,7 +874,6 @@ class Agent:
             reason="max_steps",
             limit=self.max_steps,
         )
-        self._print_trace_summary(trace)
 
         return (
             f"已达到最大执行轮数 {self.max_steps}，停止自动执行。"
