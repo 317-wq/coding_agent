@@ -11,6 +11,7 @@ from app.core.recovery import (
     RecoveryPolicy,
     RecoverySignals,
 )
+from app.core.test_evidence import test_target_covers
 from app.runtime.workspace import WorkspaceContext
 from app.tools.change_set import ChangeSetError, TaskChangeSet
 from app.tools.result import ToolResult, ToolStatus
@@ -298,7 +299,11 @@ class TaskSafetySession:
                 self.last_failed_test_error = result.error or "测试执行失败"
             elif (
                 result.status is ToolStatus.SUCCESS
-                and test_key == self.last_failed_test_key
+                and self.last_failed_test_key is not None
+                and test_target_covers(
+                    self._test_target(arguments or {}),
+                    self._test_target_from_key(self.last_failed_test_key),
+                )
             ):
                 self.last_failed_test_key = None
                 self.last_failed_test_generation = None
@@ -327,6 +332,21 @@ class TaskSafetySession:
                 recovery_attempts=self.recovery_attempts,
             )
         )
+
+    @staticmethod
+    def _test_target(arguments: dict[str, Any]) -> str:
+        """从测试工具参数提取用于父子覆盖判断的目标。"""
+        target = arguments.get("test_path", ".")
+        return target if isinstance(target, str) else "."
+
+    @staticmethod
+    def _test_target_from_key(key: str) -> str:
+        """从规范化测试键恢复测试目标。"""
+        try:
+            arguments = json.loads(key)
+        except (json.JSONDecodeError, TypeError):
+            return "."
+        return TaskSafetySession._test_target(arguments)
 
     def observe_completion(self, status: CompletionStatus) -> RecoveryDecision:
         """结合完成判定与当前净变化生成任务结束阶段的恢复决策。"""
