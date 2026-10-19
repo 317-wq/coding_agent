@@ -238,3 +238,71 @@ def test_agent_repairs_code_import_error_and_reruns_tests(
     )
     assert "项目代码导入失败" in recovery["details"]["reason"]
     assert not any(event["event"] == "rollback_finished" for event in events)
+
+
+def test_agent_blocks_identical_failed_test_until_code_changes(
+    monkeypatch, tmp_path: Path
+):
+    """验证模型不能在没有新文件修改时原样重复失败测试。"""
+    test_runs = 0
+    registry = ToolRegistry()
+
+    def run_tests(test_path="."):
+        """始终返回可复现的断言失败。"""
+        nonlocal test_runs
+        test_runs += 1
+        return ToolResult.failure(
+            "测试目标：tests\n测试退出码：1\n测试结果：失败\n"
+            "测试错误类型：断言失败\nFAILED tests/test_sample.py::test_value"
+        )
+
+    registry.register(
+        ToolSpec(
+            "run_tests",
+            "运行测试",
+            {
+                "type": "object",
+                "properties": {"test_path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            run_tests,
+        )
+    )
+
+    class FakeModel:
+        """先连续请求相同测试，再根据硬门控结束任务。"""
+
+        calls = 0
+
+        def chat(self, messages, tools):
+            """返回测试调用或最终未完成说明。"""
+            self.calls += 1
+            if self.calls <= 2:
+                return _response(
+                    tool_calls=[
+                        _call(
+                            "run_tests",
+                            f"test-{self.calls}",
+                            '{"test_path":"tests/"}',
+                        )
+                    ]
+                )
+            return _response(content="测试与约束冲突，无法安全继续修改。")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    result = agent.run("修复代码并运行 tests/，测试失败时分析原因")
+
+    assert result.startswith("最新回归测试仍然失败")
+    assert test_runs == 1
+    events = agent.last_trace.get_events()
+    rejection = next(
+        event
+        for event in events
+        if event["event"] == "safety_rejected"
+        and event["details"]["rejection_type"]
+        == "test_rerun_without_mutation"
+    )
+    assert rejection["details"]["tool_call_id"] == "test-2"
+    assert agent.last_result.status.value == "blocked"
