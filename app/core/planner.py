@@ -141,7 +141,6 @@ class TaskPlanner:
                 objectives.append("编写或补充测试用例")
             if re.search(r"运行测试|执行测试|验证|通过测试", normalized):
                 objectives.append("运行指定测试并记录结果")
-            objectives.append("总结实现结果和验证情况")
             return [f"完成：{objective}" for objective in objectives]
 
         return [f"完成：{part}" for part in parts]
