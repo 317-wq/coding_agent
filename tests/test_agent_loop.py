@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
+
 from app.core.agent import Agent
+from app.runtime.model import ModelAdapter, ModelFallbackExhaustedError
 from app.runtime.workspace import WorkspaceContext
 from app.tools.registry import ToolRegistry, ToolSpec
 
@@ -57,3 +60,79 @@ def test_complex_task_uses_plan_and_verifies_before_finishing(monkeypatch, tmp_p
     assert all(step.status.value == "completed" for step in agent.last_plan.steps)
     assert agent.last_context is not None
     assert len(agent.last_context.context.tool_results) == 3
+
+
+class FakeModelUnavailableError(RuntimeError):
+    """测试使用的带 HTTP 状态码模型不可用错误。"""
+
+    def __init__(self, message: str, status_code: int = 429) -> None:
+        """保存模拟提供商返回的状态码。"""
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class FakeCompletions:
+    """按顺序返回响应或抛出异常，并记录请求模型。"""
+
+    def __init__(self, outcomes):
+        """初始化待消费的响应与异常序列。"""
+        self.outcomes = list(outcomes)
+        self.models = []
+
+    def create(self, **kwargs):
+        """记录模型并返回下一结果，异常对象会被直接抛出。"""
+        self.models.append(kwargs["model"])
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _fake_client(outcomes):
+    """构造符合 OpenAI SDK 属性结构的最小测试客户端。"""
+    completions = FakeCompletions(outcomes)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    return client, completions
+
+
+def test_model_adapter_falls_back_and_keeps_successful_model():
+    """验证额度错误会顺序切换，后续请求沿用已成功模型。"""
+    first_success = object()
+    second_success = object()
+    client, completions = _fake_client(
+        [FakeModelUnavailableError("quota exhausted"), first_success, second_success]
+    )
+    adapter = ModelAdapter(client=client, models=("model-1", "model-2", "model-3"))
+
+    assert adapter.chat([{"role": "user", "content": "test"}]) is first_success
+    assert adapter.model == "model-2"
+    assert adapter.chat([{"role": "user", "content": "again"}]) is second_success
+    assert completions.models == ["model-1", "model-2", "model-2"]
+
+
+def test_model_adapter_does_not_switch_for_unrelated_error():
+    """验证参数等普通错误直接上抛，不错误消耗后续模型。"""
+    client, completions = _fake_client([ValueError("invalid tool schema")])
+    adapter = ModelAdapter(client=client, models=("model-1", "model-2"))
+
+    with pytest.raises(ValueError, match="invalid tool schema"):
+        adapter.chat([{"role": "user", "content": "test"}])
+
+    assert completions.models == ["model-1"]
+    assert adapter.model == "model-1"
+
+
+def test_model_adapter_reports_when_all_models_are_unavailable():
+    """验证候选全部耗尽后返回明确且不含密钥的统一错误。"""
+    client, completions = _fake_client(
+        [
+            FakeModelUnavailableError("quota exhausted"),
+            FakeModelUnavailableError("model not found", status_code=404),
+        ]
+    )
+    adapter = ModelAdapter(client=client, models=("model-1", "model-2"))
+
+    with pytest.raises(ModelFallbackExhaustedError, match="model-1, model-2"):
+        adapter.chat([{"role": "user", "content": "test"}])
+
+    assert completions.models == ["model-1", "model-2"]
