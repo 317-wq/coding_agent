@@ -63,7 +63,10 @@ def test_trace_records_planning_state_and_completion_events(monkeypatch, tmp_pat
     assert completion["details"]["completed"] is True
 
 
-def test_trace_records_git_snapshot_changes_and_recovery(monkeypatch, tmp_path):
+def test_trace_records_git_snapshot_changes_without_continue_noise(
+    monkeypatch, tmp_path
+):
+    """验证正常写入可追踪，且不会记录无动作的恢复决策。"""
     registry = ToolRegistry()
     registry.register(
         ToolSpec(
@@ -111,7 +114,19 @@ def test_trace_records_git_snapshot_changes_and_recovery(monkeypatch, tmp_path):
     assert "git_baseline_detected" in names
     assert "snapshot_created" in names
     assert "change_set_updated" in names
-    assert "recovery_decided" in names
+    assert "recovery_decided" not in names
+    tool_events = [
+        event
+        for event in agent.last_trace.get_events()
+        if event["details"].get("tool_call_id") == "create"
+    ]
+    assert {event["event"] for event in tool_events} >= {
+        "tool_call_started",
+        "snapshot_created",
+        "mutation_applied",
+        "change_set_updated",
+        "tool_call_finished",
+    }
 
 
 def _create_file(root, path, content):
