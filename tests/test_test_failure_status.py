@@ -89,3 +89,21 @@ def test_list_and_run_tests_preserve_exact_python_filename(tmp_path: Path):
     assert "文件: tests/test_completion_probe.py" in listing
     assert "测试目标：tests/test_completion_probe.py" in result
     assert "测试结果：通过" in result
+
+
+def test_edit_file_is_idempotent_when_target_content_already_exists(tmp_path: Path):
+    """验证重复执行相同文本替换不会返回失败。"""
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+    target = tmp_path / "completion_probe.py"
+    target.write_text("def probe():\n    return 42\n", encoding="utf-8")
+
+    first = tools.edit_file(
+        "completion_probe.py", "    return 42", "    return 43"
+    )
+    second = tools.edit_file(
+        "completion_probe.py", "    return 42", "    return 43"
+    )
+
+    assert "修改文件成功" in first
+    assert "无需修改" in second
+    assert target.read_text(encoding="utf-8").count("return 43") == 1
