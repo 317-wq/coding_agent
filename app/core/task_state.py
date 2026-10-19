@@ -83,9 +83,11 @@ class PlanStateManager:
             ):
                 score += 4
             if tool_name in {"create_file", "edit_file", "delete_file", "delete_directory"}:
-                if path.startswith("tests/") or "/tests/" in path:
-                    score += 5 if "测试" in text else 0
-                score += 4 if any(
+                in_tests = self._is_in_tests_path(path)
+                is_test_source = self._is_test_source_path(path)
+                if is_test_source:
+                    score += 5 if "编写" in text or "补充" in text else 0
+                score += 4 if not in_tests and any(
                     word in text
                     for word in ("实现", "修改", "修复", "创建", "新增", "功能")
                 ) else 0
@@ -120,9 +122,7 @@ class PlanStateManager:
         if "阅读" in text or "读取" in text or "项目结构" in text:
             return tool_name in {"list_files", "read_file", "search_code"}
         if "编写" in text or "补充" in text:
-            return tool_name in {"create_file", "edit_file"} and (
-                path.startswith("tests/") or "/tests/" in path
-            )
+            return tool_name in {"create_file", "edit_file"} and self._is_test_source_path(path)
         if "运行" in text or "验证" in text:
             return tool_name == "run_tests"
         if any(word in text for word in ("实现", "修改", "修复", "创建", "新增", "功能")):
@@ -130,6 +130,20 @@ class PlanStateManager:
                 path.startswith("tests/") or "/tests/" in path
             )
         return tool_name in {"create_file", "edit_file", "run_tests"}
+
+    @staticmethod
+    def _is_test_source_path(path: str) -> bool:
+        """判断路径是否为能证明测试已编写的 Python 测试源文件。"""
+        normalized = path.replace("\\", "/")
+        name = normalized.rsplit("/", 1)[-1]
+        in_tests = PlanStateManager._is_in_tests_path(normalized)
+        return in_tests and (name.startswith("test_") or name == "conftest.py")
+
+    @staticmethod
+    def _is_in_tests_path(path: str) -> bool:
+        """判断路径是否位于 tests 目录中。"""
+        normalized = path.replace("\\", "/")
+        return normalized.startswith("tests/") or "/tests/" in normalized
 
     def complete_step(self, step_id: int, result: Any = None) -> TaskPlan:
         del result  # 结果由上下文模块保存；此处只负责状态流转。
