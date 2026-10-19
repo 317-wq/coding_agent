@@ -191,18 +191,7 @@ def set_workspace(context: WorkspaceContext) -> None:
 
 
 def _resolve_path(path: str) -> Path:
-    """解析工作区相对路径；允许模型传入当前工作区的绝对路径并归一化。"""
-
-    candidate = Path(path).expanduser()
-    if candidate.is_absolute():
-        root = WORKSPACE_CONTEXT.root.resolve()
-        resolved = candidate.resolve()
-        if resolved == root:
-            path = "."
-        elif root in resolved.parents:
-            path = resolved.relative_to(root).as_posix()
-        else:
-            raise ValueError("禁止访问工作目录之外的路径。")
+    """通过共享工作区上下文统一解析并校验工具路径。"""
     return WORKSPACE_CONTEXT.resolve(path)
 
 
@@ -231,7 +220,7 @@ def list_files(path: str = ".", recursive: bool = True) -> str:
                 if entry.name in IGNORED_DIRS or entry.is_symlink():
                     continue
 
-                relative_path = entry.relative_to(WORKSPACE)
+                relative_path = entry.relative_to(WORKSPACE).as_posix()
 
                 if entry.is_dir():
                     entries.append(f"目录: {relative_path}")
@@ -517,6 +506,7 @@ def run_tests(test_path: str = ".") -> str:
     """运行指定测试文件、测试目录或整个工作区的 pytest。"""
     try:
         target_path = _resolve_path(test_path)
+        canonical_target = WORKSPACE_CONTEXT.relative_path(test_path)
 
         if not target_path.exists():
             return f"错误：测试路径不存在：{test_path}"
@@ -586,7 +576,7 @@ def run_tests(test_path: str = ".") -> str:
                 error_kind = "测试错误类型：断言失败\n"
 
         return (
-            f"测试目标：{test_path}\n"
+            f"测试目标：{canonical_target}\n"
             f"测试退出码：{result.returncode}\n"
             f"测试结果：{status}\n"
             f"{error_kind}"
@@ -751,5 +741,5 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> str:
 
     except TypeError as exc:
         return f"错误：工具参数不正确：{exc}"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - 旧工具分发入口的异常边界
         return f"错误：工具执行异常：{exc}"
