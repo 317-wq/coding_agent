@@ -77,6 +77,7 @@ class RecoveryPolicy:
         self.max_recovery_attempts = max_recovery_attempts
 
     def decide(self, signals: RecoverySignals) -> RecoveryDecision:
+        """按失败类型、修复轮次和可回滚路径选择下一恢复动作。"""
         triggers = self._triggers(signals)
         paths = tuple(dict.fromkeys(signals.recoverable_paths))
 
@@ -94,18 +95,43 @@ class RecoveryPolicy:
                 paths,
             )
 
-        if signals.test_error_kind in {"collection", "environment"}:
+        if signals.test_error_kind == "environment":
             return RecoveryDecision(
                 RecoveryAction.STOP,
-                "测试执行环境或收集阶段出错，未自动回滚代码；请先处理测试环境问题。",
+                "测试执行环境出错，无法通过修改项目代码可靠修复；请先处理测试环境问题。",
                 triggers,
                 paths,
             )
 
-        if signals.test_error_kind == "test_code":
+        repairable_test_error = signals.test_error_kind in {
+            "collection",
+            "import",
+            "test_code",
+        }
+        if repairable_test_error and signals.test_repair_attempts >= 2 and paths:
+            return RecoveryDecision(
+                RecoveryAction.SUGGEST_ROLLBACK,
+                "测试错误自动修复已达到上限 2 次，询问用户是否回滚当前修改。",
+                triggers,
+                paths,
+            )
+
+        if repairable_test_error and signals.test_repair_attempts >= 2:
+            return RecoveryDecision(
+                RecoveryAction.STOP,
+                "测试错误自动修复次数已达到上限 2 次，请人工处理。",
+                triggers,
+            )
+
+        if repairable_test_error:
+            error_labels = {
+                "collection": "测试收集失败",
+                "import": "项目代码导入失败",
+                "test_code": "测试代码错误",
+            }
             return RecoveryDecision(
                 RecoveryAction.REPLAN,
-                "测试代码存在错误，优先修复测试代码后重新运行，不回滚业务修改。",
+                f"{error_labels[signals.test_error_kind]}，保留失败证据并分析相关代码后自动修复。",
                 triggers,
                 paths,
             )
