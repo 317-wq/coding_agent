@@ -37,6 +37,7 @@ class TraceSummaryBuilder:
         "recovery_decided",
         "rollback_finished",
         "requirements_checked",
+        "final_state_verified",
     })
 
     def build(self, trace: ExecutionTrace | None, limit: int = 12) -> tuple[TraceReference, ...]:
@@ -58,9 +59,18 @@ class TraceSummaryBuilder:
                     summary=self._summary(details),
                 )
             )
-            if len(references) >= limit:
-                break
-        return tuple(references)
+        selected = references[:limit]
+        final_reference = next(
+            (
+                item
+                for item in reversed(references)
+                if item.event == "final_state_verified"
+            ),
+            None,
+        )
+        if final_reference is not None and final_reference not in selected:
+            selected[-1] = final_reference
+        return tuple(selected)
 
     @staticmethod
     def _summary(details: Any) -> str:
