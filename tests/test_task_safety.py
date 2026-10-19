@@ -200,6 +200,24 @@ def test_same_failed_test_requires_real_mutation_before_rerun(tmp_path: Path):
     assert "tests/test_sample.py::test_value" in session.unresolved_test_reason()
 
 
+def test_passing_parent_test_clears_failed_child_state(tmp_path: Path):
+    """验证完整文件通过会清除该文件内子用例的未解决失败。"""
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    session.observe(
+        "run_tests",
+        ToolResult.failure("测试错误类型：断言失败\n测试结果：失败"),
+        arguments={"test_path": "tests/test_app.py::TestApp::test_one"},
+    )
+
+    session.observe(
+        "run_tests",
+        ToolResult.success("测试目标：tests/test_app.py\n测试结果：通过"),
+        arguments={"test_path": "tests/test_app.py"},
+    )
+
+    assert session.unresolved_test_reason() is None
+
+
 def test_reset_after_recovery_starts_new_change_session(tmp_path: Path):
     session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
     session.prepare_tool("create_file", {"path": "new.py"})
