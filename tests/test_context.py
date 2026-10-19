@@ -52,3 +52,19 @@ def test_context_validates_inputs():
         manager.add_tool_result("错误")
     with pytest.raises(ValueError, match="测试结果不能为空"):
         manager.add_test_result(" ")
+
+
+def test_begin_replan_discards_resolved_tool_failures_but_keeps_evidence():
+    """验证重规划清理旧工具失败，同时保留成功工具和测试历史。"""
+    manager = ContextManager("修改代码", plan=create_task_plan("修改代码"))
+    manager.add_tool_result(ToolResult.failure("旧路径不存在"))
+    manager.add_tool_result(ToolResult.success("已读取正确文件"))
+    manager.add_test_result("测试目标：tests\n测试结果：失败")
+    new_plan = create_task_plan("修改代码并运行测试")
+
+    context = manager.begin_replan(new_plan)
+
+    assert context.plan is new_plan
+    assert context.current_step_id is None
+    assert context.tool_results == (ToolResult.success("已读取正确文件"),)
+    assert context.test_results == ("测试目标：tests\n测试结果：失败",)
