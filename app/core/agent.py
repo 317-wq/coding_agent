@@ -92,7 +92,11 @@ class Agent:
 
     def _build_task_result(self, task: str) -> None:
         """从本次 Agent 运行证据生成并保存 TaskResult。"""
-        if self.last_trace is None or self.last_context is None or self.last_change_set is None:
+        if (
+            self.last_trace is None
+            or self.last_context is None
+            or self.last_change_set is None
+        ):
             return
         try:
             changes = self.last_change_set.summary()
@@ -108,9 +112,7 @@ class Agent:
         if completion_status == "blocked":
             task_status = TaskStatus.BLOCKED
         repair_attempts = (
-            self.last_safety.test_repair_attempts
-            if self.last_safety is not None
-            else 0
+            self.last_safety.test_repair_attempts if self.last_safety is not None else 0
         )
         self.last_result = TaskResultAggregator().aggregate(
             self.last_context.context,
@@ -151,9 +153,7 @@ class Agent:
         state_manager = (
             PlanStateManager(self.last_plan) if self.last_plan is not None else None
         )
-        self.last_context = ContextManager(
-            task, project_snapshot, self.last_plan
-        )
+        self.last_context = ContextManager(task, project_snapshot, self.last_plan)
         safety = TaskSafetySession(self.workspace, task=task)
         self.last_safety = safety
         self.last_change_set = safety.change_set
@@ -273,9 +273,7 @@ class Agent:
                         missing=requirement_check.missing,
                     )
                     if not requirement_check.passed:
-                        messages.append(
-                            {"role": "assistant", "content": answer}
-                        )
+                        messages.append({"role": "assistant", "content": answer})
                         messages.append(
                             {
                                 "role": "system",
@@ -310,7 +308,9 @@ class Agent:
                                     "用户拒绝回滚，当前修改已保留；"
                                     "请确认是否继续执行后续修复。"
                                 )
-                                trace.record("user_confirmation_required", reason=reason)
+                                trace.record(
+                                    "user_confirmation_required", reason=reason
+                                )
                                 self._print_trace_summary(trace)
                                 return reason
                             trace.record(
@@ -367,11 +367,22 @@ class Agent:
                                 trace.record("task_stopped", reason=reason)
                                 self._print_trace_summary(trace)
                                 return reason
+                            post_rollback = safety.change_set.summary()
+                            trace.record(
+                                "change_set_updated",
+                                comparison_basis="task_initial_state",
+                                reason="rollback_verified",
+                                touched_count=post_rollback.touched_count,
+                                unchanged_count=post_rollback.unchanged_count,
+                                changed_count=post_rollback.net_changed_count,
+                                net_changed_count=post_rollback.net_changed_count,
+                                created_paths=post_rollback.created_paths,
+                                modified_paths=post_rollback.modified_paths,
+                                deleted_paths=post_rollback.deleted_paths,
+                            )
                             safety.reset_after_recovery(rollback.status)
                             self.last_change_set = safety.change_set
-                            project_snapshot = ProjectExplorer(
-                                self.workspace
-                            ).explore()
+                            project_snapshot = ProjectExplorer(self.workspace).explore()
                             new_complexity = judge_task_complexity(
                                 task, project_snapshot
                             )
@@ -394,20 +405,15 @@ class Agent:
                             )
                             continue
                         if recovery.action is RecoveryAction.STOP:
-                            trace.record(
-                                "task_stopped", reason=recovery.reason
-                            )
+                            trace.record("task_stopped", reason=recovery.reason)
                             self._print_trace_summary(trace)
                             return recovery.reason
-                        messages.append(
-                            {"role": "assistant", "content": answer}
-                        )
+                        messages.append({"role": "assistant", "content": answer})
                         messages.append(
                             {
                                 "role": "system",
                                 "content": (
-                                    "完成判定未通过，请继续执行："
-                                    f"{decision.reason}"
+                                    f"完成判定未通过，请继续执行：{decision.reason}"
                                 ),
                             }
                         )
@@ -462,16 +468,11 @@ class Agent:
                         )
 
                 except (json.JSONDecodeError, ValueError) as exc:
-                    tool_result = ToolResult.failure(
-                        f"工具参数解析失败：{exc}"
-                    )
+                    tool_result = ToolResult.failure(f"工具参数解析失败：{exc}")
                     if self.last_context is not None:
                         before_trim = self.last_context.context.truncated_count
                         self.last_context.add_tool_result(tool_result)
-                        if (
-                            self.last_context.context.truncated_count
-                            > before_trim
-                        ):
+                        if self.last_context.context.truncated_count > before_trim:
                             trace.record(
                                 "context_trimmed",
                                 truncated_count=(
@@ -484,10 +485,7 @@ class Agent:
                         status=tool_result.status.value,
                         error=str(exc),
                     )
-                    print(
-                        f"[Tool Error] {tool_name}: "
-                        f"{tool_result.to_json()}"
-                    )
+                    print(f"[Tool Error] {tool_name}: {tool_result.to_json()}")
 
                     messages.append(
                         {
@@ -507,8 +505,7 @@ class Agent:
                     tool_call_id=tool_call.id,
                 )
                 print(
-                    f"[Tool] {tool_name}"
-                    f"({json.dumps(arguments, ensure_ascii=False)})"
+                    f"[Tool] {tool_name}({json.dumps(arguments, ensure_ascii=False)})"
                 )
 
                 cached_result = safety.completed_mutation(tool_name, arguments)
@@ -541,15 +538,15 @@ class Agent:
                     )
                     continue
 
+                snapshot_paths: tuple[str, ...] = ()
+                pre_tool_changes: dict[str, dict] = {}
                 try:
                     safety.validate_tool(tool_name, arguments)
                     snapshot_paths = safety.prepare_tool(tool_name, arguments)
-                    if snapshot_paths:
-                        trace.record(
-                            "snapshot_created",
-                            tool=tool_name,
-                            paths=snapshot_paths,
-                        )
+                    pre_tool_changes = {
+                        change.path: change.to_dict()
+                        for change in safety.change_set.summary().changes
+                    }
                     tool_result = self.registry.execute(tool_name, arguments)
                 except KeyboardInterrupt:
                     trace.record(
@@ -560,27 +557,66 @@ class Agent:
                     self._print_trace_summary(trace)
                     raise
                 except TaskConstraintViolation as exc:
-                    trace.record("task_stopped", reason="user_constraint_violation", error=str(exc))
+                    trace.record(
+                        "task_stopped",
+                        reason="user_constraint_violation",
+                        error=str(exc),
+                    )
                     self._print_trace_summary(trace)
                     return str(exc)
                 except Exception as exc:  # noqa: BLE001 - tool boundary
-                    tool_result = ToolResult.failure(
-                        f"工具执行异常：{exc}"
-                    )
+                    tool_result = ToolResult.failure(f"工具执行异常：{exc}")
 
                 tool_call_count += 1
-                safety.record_completed_mutation(tool_name, arguments, tool_result)
-
-                if tool_result.status is ToolStatus.FAILURE and self._is_boundary_failure(tool_result):
-                    reason = tool_result.error or "工具访问违反工作区安全边界。"
-                    trace.record("task_stopped", reason="workspace_boundary_violation", error=reason)
-                    self._print_trace_summary(trace)
-                    return reason
+                reported_mutation = safety.record_completed_mutation(
+                    tool_name, arguments, tool_result
+                )
+                post_tool_changes = safety.change_set.summary()
+                post_tool_changes_by_path = {
+                    change.path: change.to_dict()
+                    for change in post_tool_changes.changes
+                }
+                changed_snapshot_paths = tuple(
+                    path
+                    for path in snapshot_paths
+                    if pre_tool_changes.get(path) != post_tool_changes_by_path.get(path)
+                )
+                if changed_snapshot_paths:
+                    trace.record(
+                        "snapshot_created",
+                        tool=tool_name,
+                        paths=changed_snapshot_paths,
+                        purpose="rollback_baseline",
+                    )
+                mutation_applied = bool(changed_snapshot_paths) or (
+                    reported_mutation and not snapshot_paths
+                )
+                if mutation_applied:
+                    trace.record(
+                        "mutation_applied",
+                        tool=tool_name,
+                        path=arguments.get("path"),
+                        tool_status=tool_result.status.value,
+                        net_change=any(
+                            path in post_tool_changes_by_path
+                            for path in changed_snapshot_paths
+                        ),
+                    )
 
                 if (
                     tool_result.status is ToolStatus.FAILURE
-                    and safety.validation_only
+                    and self._is_boundary_failure(tool_result)
                 ):
+                    reason = tool_result.error or "工具访问违反工作区安全边界。"
+                    trace.record(
+                        "task_stopped",
+                        reason="workspace_boundary_violation",
+                        error=reason,
+                    )
+                    self._print_trace_summary(trace)
+                    return reason
+
+                if tool_result.status is ToolStatus.FAILURE and safety.validation_only:
                     reason = tool_result.error or "验收工具执行失败，已停止继续探索。"
                     trace.record(
                         "task_stopped",
@@ -642,8 +678,7 @@ class Agent:
                         )
 
                 plan_failed = bool(
-                    state_manager is not None
-                    and state_manager.state().failed_step_ids
+                    state_manager is not None and state_manager.state().failed_step_ids
                 )
                 try:
                     recovery = safety.observe(
@@ -660,8 +695,11 @@ class Agent:
                 change_summary = safety.change_set.summary()
                 trace.record(
                     "change_set_updated",
+                    comparison_basis="task_initial_state",
                     touched_count=change_summary.touched_count,
-                    changed_count=len(change_summary.changes),
+                    unchanged_count=change_summary.unchanged_count,
+                    changed_count=change_summary.net_changed_count,
+                    net_changed_count=change_summary.net_changed_count,
                     created_paths=change_summary.created_paths,
                     modified_paths=change_summary.modified_paths,
                     deleted_paths=change_summary.deleted_paths,
@@ -697,8 +735,7 @@ class Agent:
                 if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
                     if rollback_denied:
                         reason = (
-                            "用户拒绝回滚，当前修改已保留；"
-                            "请确认是否继续执行后续修复。"
+                            "用户拒绝回滚，当前修改已保留；请确认是否继续执行后续修复。"
                         )
                         trace.record("user_confirmation_required", reason=reason)
                         self._print_trace_summary(trace)
@@ -737,9 +774,7 @@ class Agent:
                                     ),
                                 }
                             )
-                            project_snapshot = ProjectExplorer(
-                                self.workspace
-                            ).explore()
+                            project_snapshot = ProjectExplorer(self.workspace).explore()
                             decision = judge_task_complexity(task, project_snapshot)
                             self.last_plan = create_task_plan(
                                 task, project_snapshot, decision
@@ -753,13 +788,24 @@ class Agent:
                         self._print_trace_summary(trace)
                         return reason
 
+                    post_rollback = safety.change_set.summary()
+                    trace.record(
+                        "change_set_updated",
+                        comparison_basis="task_initial_state",
+                        reason="rollback_verified",
+                        touched_count=post_rollback.touched_count,
+                        unchanged_count=post_rollback.unchanged_count,
+                        changed_count=post_rollback.net_changed_count,
+                        net_changed_count=post_rollback.net_changed_count,
+                        created_paths=post_rollback.created_paths,
+                        modified_paths=post_rollback.modified_paths,
+                        deleted_paths=post_rollback.deleted_paths,
+                    )
                     safety.reset_after_recovery(rollback.status)
                     self.last_change_set = safety.change_set
                     project_snapshot = ProjectExplorer(self.workspace).explore()
                     decision = judge_task_complexity(task, project_snapshot)
-                    self.last_plan = create_task_plan(
-                        task, project_snapshot, decision
-                    )
+                    self.last_plan = create_task_plan(task, project_snapshot, decision)
                     state_manager = PlanStateManager(self.last_plan)
                     self.last_context = ContextManager(
                         task, project_snapshot, self.last_plan
@@ -779,9 +825,7 @@ class Agent:
                 if recovery.action is RecoveryAction.REPLAN:
                     project_snapshot = ProjectExplorer(self.workspace).explore()
                     decision = judge_task_complexity(task, project_snapshot)
-                    self.last_plan = create_task_plan(
-                        task, project_snapshot, decision
-                    )
+                    self.last_plan = create_task_plan(task, project_snapshot, decision)
                     state_manager = PlanStateManager(self.last_plan)
                     self.last_context = ContextManager(
                         task, project_snapshot, self.last_plan
