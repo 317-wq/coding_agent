@@ -116,7 +116,7 @@ def test_agent_returns_cancelled_json_and_continues(monkeypatch, tmp_path: Path)
     monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
     agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
 
-    assert agent.run("测试取消") == "取消已确认"
+    assert agent.run("测试取消") == "完成判定已阻塞且没有可恢复变更，停止当前执行。"
 
 
 def test_agent_returns_structured_json_for_invalid_arguments(
