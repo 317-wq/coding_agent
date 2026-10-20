@@ -702,6 +702,54 @@ class Agent:
                     )
                     continue
 
+                if (
+                    tool_name == "create_file"
+                    and safety.task_created_file_exists(arguments.get("path"))
+                ):
+                    path = str(arguments.get("path"))
+                    redirect_result = ToolResult.success(
+                        f"未重复创建：{path} 已由本任务创建；"
+                        "如需改变内容，请基于已知内容调用 edit_file。"
+                    )
+                    trace.record(
+                        "conflicting_create_redirected",
+                        tool=tool_name,
+                        path=path,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        reason="本任务创建的文件已存在，要求改用 edit_file。",
+                    )
+                    trace.record(
+                        "tool_call_finished",
+                        tool=tool_name,
+                        tool_call_id=tool_call.id,
+                        request_id=request_id,
+                        status=redirect_result.status.value,
+                        result=redirect_result.result,
+                        error=None,
+                        redirected=True,
+                    )
+                    result_json = redirect_result.to_json()
+                    print(f"[Tool Result] {result_json[:500]}")
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result_json,
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"`{path}` 已由本任务创建。不要再次 create_file；"
+                                "如需调整内容，请使用 edit_file，"
+                                "否则继续创建下一个尚未完成的文件。"
+                            ),
+                        }
+                    )
+                    continue
+
                 if tool_call_count >= self.max_tool_calls:
                     reason = (
                         f"已达到工具调用上限 {self.max_tool_calls}，"
