@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 from app.core.agent import Agent
 from app.core.recovery import RecoveryAction
@@ -368,10 +369,14 @@ def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
         """先提前总结一次，再遵循控制层要求重跑测试。"""
 
         calls = 0
+        tool_sets: ClassVar[list[tuple[str, ...]]] = []
 
         def chat(self, messages, tools):
             """按失败、修改、错误总结、重跑和完成的顺序返回响应。"""
             self.calls += 1
+            self.tool_sets.append(
+                tuple(item["function"]["name"] for item in tools)
+            )
             if self.calls == 1:
                 return _response(
                     tool_calls=[
@@ -409,6 +414,8 @@ def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
     assert deferred_reads == 0
     assert agent.last_result.completed is True
     assert agent.last_result.repair_attempts == 1
+    assert FakeModel.tool_sets[2] == ("run_tests",)
+    assert FakeModel.tool_sets[3] == ("run_tests",)
     rerun_event = next(
         event
         for event in agent.last_trace.get_events()
