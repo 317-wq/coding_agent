@@ -19,6 +19,9 @@ class TaskRequirementVerifier:
     _PATH_PATTERN = re.compile(
         r"(?:`([^`]+)`|(?<![\w./-])((?:[\w.-]+/)+[\w.-]+\.py)\b)"
     )
+    _BARE_PYTHON_FILE_PATTERN = re.compile(
+        r"(?m)^\s*-\s*`?([A-Za-z_][\w.-]*\.py)`?\s*[：:]"
+    )
     _EXCEPTION_PATTERN = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:Error|Exception)\b")
 
     def verify(self, task: str, workspace: WorkspaceContext) -> RequirementCheck:
@@ -36,14 +39,31 @@ class TaskRequirementVerifier:
                 missing.append(f"明确要求的文件路径越界：{path}")
 
         files = self._python_files(workspace.root)
+        relative_files = {
+            path.relative_to(workspace.root).as_posix(): path for path in files
+        }
+        for name in dict.fromkeys(self._BARE_PYTHON_FILE_PATTERN.findall(task)):
+            if not any(path == name or path.endswith(f"/{name}") for path in relative_files):
+                missing.append(f"明确要求的文件不存在：{name}")
+
         contents = "\n".join(
             self._read(path) for path in files if path.is_file()
+        )
+        source_contents = "\n".join(
+            self._read(path)
+            for path in files
+            if path.is_file() and "tests" not in path.relative_to(workspace.root).parts
         )
         for exception_name in dict.fromkeys(self._EXCEPTION_PATTERN.findall(task)):
             if exception_name not in contents:
                 missing.append(f"未在最终代码中发现明确要求的异常：{exception_name}")
 
         lowered = task.lower()
+        if "argparse" in lowered and not re.search(
+            r"(?:^|\n)\s*(?:import\s+argparse|from\s+argparse\s+import)",
+            source_contents,
+        ):
+            missing.append("任务明确要求 argparse，但业务代码中未发现 argparse 使用。")
         if "pytest" in lowered and "pytest" not in contents.lower():
             missing.append("任务明确要求 pytest，但最终代码中未发现 pytest 使用。")
         if "unittest" in lowered and "unittest" not in contents.lower():
