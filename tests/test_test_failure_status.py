@@ -52,6 +52,17 @@ def test_run_tests_marks_pytest_collection_conflict(tmp_path: Path):
     assert "测试结果：失败" in result
 
 
+def test_run_tests_distinguishes_missing_tests_from_assertion_failure(tmp_path: Path):
+    """验证空测试目录不会被误报为断言失败。"""
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+
+    result = tools.run_tests(".")
+
+    assert "测试退出码：5" in result
+    assert "测试错误类型：未发现测试" in result
+    assert "测试错误类型：断言失败" not in result
+
+
 def test_run_tests_marks_circular_import_as_repairable_code_error(tmp_path: Path):
     """验证循环导入不会被误判为不可修复的测试环境问题。"""
     (tmp_path / "module_a.py").write_text(
