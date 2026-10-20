@@ -293,7 +293,11 @@ class TaskSafetySession:
             self._mutation_paths_since_test.clear()
 
             test_key = self._test_key(arguments or {})
-            if result.status is ToolStatus.FAILURE:
+            no_tests_collected = (
+                result.status is ToolStatus.FAILURE
+                and "测试错误类型：未发现测试" in (result.error or "")
+            )
+            if result.status is ToolStatus.FAILURE and not no_tests_collected:
                 self.last_failed_test_key = test_key
                 self.last_failed_test_generation = self.mutation_generation
                 self.last_failed_test_error = result.error or "测试执行失败"
@@ -311,7 +315,10 @@ class TaskSafetySession:
 
         if tool_name == "run_tests" and result.status is ToolStatus.FAILURE:
             message = result.error or ""
-            if "测试错误类型：收集冲突" in message:
+            if (
+                "测试错误类型：未发现测试" in message
+                or "测试错误类型：收集冲突" in message
+            ):
                 test_error_kind = "collection"
             elif "测试错误类型：环境错误" in message:
                 test_error_kind = "environment"
