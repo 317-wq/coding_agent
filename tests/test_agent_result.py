@@ -578,6 +578,65 @@ def test_agent_skips_identical_successful_edit(monkeypatch, tmp_path: Path):
     assert "duplicate_tool_call_skipped" in names
 
 
+def test_agent_redirects_second_create_of_task_file_to_edit(
+    monkeypatch, tmp_path: Path
+):
+    """验证本任务文件的不同内容二次创建不会失败或触发回滚。"""
+    registry = ToolRegistry()
+
+    def create_file(path, content):
+        (tmp_path / path).write_text(content, encoding="utf-8")
+        return "创建成功"
+
+    registry.register(
+        ToolSpec(
+            "create_file",
+            "创建文件",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+            create_file,
+        )
+    )
+
+    class FakeModel:
+        """先后用不同内容请求创建同一文件，再结束任务。"""
+
+        requests = 0
+
+        def chat(self, messages, tools):
+            self.requests += 1
+            if self.requests <= 2:
+                content = "first" if self.requests == 1 else "second"
+                return make_response(
+                    tool_calls=[
+                        make_tool_call(
+                            "create_file",
+                            f"create-{self.requests}",
+                            json.dumps({"path": "module.py", "content": content}),
+                        )
+                    ]
+                )
+            assert "请使用 edit_file" in str(messages)
+            return make_response(content="保留首次创建内容")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    agent.run("创建 module.py 并完成任务")
+
+    assert (tmp_path / "module.py").read_text(encoding="utf-8") == "first"
+    names = [event["event"] for event in agent.last_trace.get_events()]
+    assert "conflicting_create_redirected" in names
+    assert "rollback_authorization_requested" not in names
+
+
 def test_agent_keeps_tool_call_limit(monkeypatch, tmp_path: Path):
     executions = []
     registry = ToolRegistry()
