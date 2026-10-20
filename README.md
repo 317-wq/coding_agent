@@ -5,7 +5,8 @@
 ## 特性
 
 - 支持通过 `--workspace` 指定受控工作区，所有文件操作限制在该目录内。
-- 使用 Typer 构建类型安全的命令行参数，使用 Rich 渲染帮助页、状态和任务报告。
+- 使用 Typer 构建类型安全的命令行参数，使用 Rich 渲染帮助页、执行进度和任务报告。
+- 默认隐藏模型轮次、工具调用和 Trace 细节，需要排查问题时可通过 `--debug` 完整显示。
 - 使用结构化计划跟踪“阅读 → 实现 → 编写测试 → 运行测试”阶段。
 - 内置文件读写、目录管理、代码搜索、pytest、只读 Git 查询等工具。
 - 写入前创建快照，写入后核验磁盘内容；重复写入和越界访问会被拦截。
@@ -59,7 +60,7 @@ uv run coding-agent --workspace ./workspace/demo
 
 仍可使用模块形式：`uv run python -m app.cli.main --workspace ./workspace/demo`。
 
-启动后输入任务，输入单独一行 `END` 提交多行任务；输入 `exit` 或 `quit` 退出。
+在交互终端中，按 Enter 提交任务，按 Shift+Enter 插入换行；如果终端无法区分 Shift+Enter，可使用 Alt+Enter。一次粘贴的多行文本会完整保留在同一个输入缓冲区中，粘贴完成后按 Enter 即可提交。输入 `exit` 或 `quit` 退出。
 
 常用参数：
 
@@ -74,11 +75,16 @@ uv run coding-agent \
   --workspace ./workspace/demo \
   --max-steps 50 \
   --max-tool-calls 120
+
+# 显示完整 Trace、模型轮次和工具调用日志
+uv run coding-agent \
+  --workspace ./workspace/demo \
+  --debug
 ```
 
 ### 更简单的一次性调用
 
-不想手动输入 `END` 时，可以使用 Shell here-document：
+非交互式管道输入继续使用单独一行 `END` 作为任务结束标记。例如 Shell here-document：
 
 ```bash
 uv run coding-agent --workspace ./workspace/demo <<'TASK'
