@@ -69,10 +69,20 @@ def test_subdirectory_workspace_does_not_expose_parent_changes(tmp_path: Path):
     assert "tracked.txt" not in status
 
 
-def test_non_repository_and_outside_path_are_rejected(tmp_path: Path):
+def test_non_repository_is_reported_without_failing_read_tool(tmp_path: Path):
     reader = GitReadTools(WorkspaceContext.from_path(tmp_path))
 
-    assert reader.status().startswith("错误：工作区不在 Git 仓库中")
+    assert reader.status() == "当前工作区不是 Git 仓库，无法提供 Git 查询结果。"
+    assert reader.diff() == "当前工作区不是 Git 仓库，无法提供 Git 查询结果。"
+
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+    registry = build_default_registry()
+    assert registry.execute("git_status", {}).status is ToolStatus.SUCCESS
+
+
+def test_git_query_outside_workspace_is_rejected(tmp_path: Path):
+    reader = GitReadTools(WorkspaceContext.from_path(tmp_path))
+
     assert reader.diff("../outside").startswith("错误：Git 查询路径无效")
 
 
