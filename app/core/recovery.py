@@ -161,8 +161,7 @@ class RecoveryPolicy:
             )
 
         hard_failure = (
-            signals.plan_failed
-            or signals.completion_status is CompletionStatus.BLOCKED
+            signals.completion_status is CompletionStatus.BLOCKED
             or signals.consecutive_tool_failures
             >= self.consecutive_failure_threshold
         )
@@ -186,6 +185,14 @@ class RecoveryPolicy:
                 RecoveryAction.REPLAN,
                 "执行失败已达到恢复条件，建议放弃当前计划并重新规划。",
                 triggers,
+            )
+
+        if signals.plan_failed:
+            return RecoveryDecision(
+                RecoveryAction.REPLAN,
+                "当前计划步骤失败，保留已有修改并重新规划修复。",
+                triggers,
+                paths,
             )
 
         return RecoveryDecision(
