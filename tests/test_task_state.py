@@ -141,6 +141,20 @@ def test_test_authoring_stays_running_until_tests_execute():
     assert manager.should_advance_for_tool(authoring, "run_tests", {"test_path": "."})
 
 
+def test_later_phase_starts_even_when_its_tool_result_fails():
+    """验证失败测试仍证明测试阶段已开始，前一开发阶段应当结束。"""
+    manager = PlanStateManager(create_task_plan("修改代码，然后运行测试"))
+    implementation = manager.match_step("edit_file", {"path": "module.py"})
+    assert implementation is not None
+    manager.start_step(implementation)
+
+    assert manager.should_advance_for_tool(
+        implementation,
+        "run_tests",
+        {"test_path": "."},
+    )
+
+
 def test_development_plan_defers_tests_while_sources_are_missing():
     """验证实现或测试编写未完成时，空工作区不应直接运行测试。"""
     manager = PlanStateManager(
