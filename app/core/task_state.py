@@ -158,6 +158,15 @@ class PlanStateManager:
         matched = self.match_step(tool_name, arguments)
         return matched is not None and matched > step_id
 
+    def should_defer_tests_without_sources(self) -> bool:
+        """判断开发计划是否仍需先实现功能或编写测试源文件。"""
+        development_markers = ("实现", "修改", "修复", "创建", "新增", "编写", "补充", "功能")
+        return any(
+            step.status in {PlanStepStatus.PENDING, PlanStepStatus.RUNNING}
+            and any(marker in step.objective for marker in development_markers)
+            for step in self._plan.steps
+        )
+
     def _has_later_development_step(self, step_id: int) -> bool:
         """判断实现步骤之后是否还有测试编写或执行验收阶段。"""
         return any(
