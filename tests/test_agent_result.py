@@ -564,9 +564,14 @@ def test_agent_skips_identical_successful_edit(monkeypatch, tmp_path: Path):
             return make_response(content="完成")
 
     monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
-    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
-    agent.run("修改 completion_probe.py")
+    agent = Agent(
+        WorkspaceContext.from_path(tmp_path),
+        max_tool_calls=1,
+        registry=registry,
+    )
+    result = agent.run("修改 completion_probe.py")
 
+    assert not result.startswith("已达到工具调用上限")
     assert executions == ["completion_probe.py"]
     assert target.read_text(encoding="utf-8") == "return 43"
     names = [event["event"] for event in agent.last_trace.get_events()]
@@ -612,6 +617,35 @@ def test_agent_keeps_step_limit(monkeypatch, tmp_path: Path):
     agent = Agent(WorkspaceContext.from_path(tmp_path), max_steps=1, registry=registry)
 
     assert agent.run("测试轮数上限").startswith("已达到最大执行轮数 1")
+
+
+def test_agent_hides_run_tests_for_empty_development_workspace(
+    monkeypatch, tmp_path: Path
+):
+    """验证空开发工作区先实现和编写用例，不向模型暴露 run_tests。"""
+    observed_tools = []
+
+    class FakeModel:
+        """记录首轮可用工具后结束请求。"""
+
+        def chat(self, messages, tools):
+            observed_tools.append(
+                tuple(item["function"]["name"] for item in tools)
+            )
+            return make_response(content="尚未实现")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), max_steps=1)
+
+    agent.run("阅读空项目，然后实现功能，编写 pytest 测试并运行测试")
+
+    assert "run_tests" not in observed_tools[0]
+    constrained = [
+        event
+        for event in agent.last_trace.get_events()
+        if event["event"] == "tool_availability_constrained"
+    ]
+    assert constrained[-1]["details"]["unavailable_tools"] == ["run_tests"]
 
 
 def test_agent_completes_when_final_allowed_round_finishes_plan(
