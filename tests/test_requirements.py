@@ -51,3 +51,34 @@ def test_preserves_full_nested_unquoted_python_path(tmp_path: Path):
 
     assert result.passed is True
     assert result.missing == ()
+
+
+def test_checks_bare_module_names_and_argparse(tmp_path: Path):
+    """验证模块清单中的裸文件名和指定 CLI 框架都参与最终核验。"""
+    package = tmp_path / "todo_cli"
+    package.mkdir()
+    (package / "models.py").write_text("class Todo: pass\n", encoding="utf-8")
+    (package / "cli.py").write_text("from click import group\n", encoding="utf-8")
+    task = """使用 argparse 实现 CLI。\n- `models.py`：模型。\n- `storage.py`：存储。"""
+
+    result = TaskRequirementVerifier().verify(
+        task, WorkspaceContext.from_path(tmp_path)
+    )
+
+    assert result.passed is False
+    assert "明确要求的文件不存在：storage.py" in result.missing
+    assert any("argparse" in item for item in result.missing)
+
+
+def test_accepts_argparse_in_business_source(tmp_path: Path):
+    """验证业务模块真实导入 argparse 时满足框架约束。"""
+    package = tmp_path / "todo_cli"
+    package.mkdir()
+    (package / "cli.py").write_text("import argparse\n", encoding="utf-8")
+
+    result = TaskRequirementVerifier().verify(
+        "使用 argparse 实现 CLI。\n- `cli.py`：入口。",
+        WorkspaceContext.from_path(tmp_path),
+    )
+
+    assert result.passed is True
