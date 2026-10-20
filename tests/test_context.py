@@ -42,6 +42,20 @@ def test_context_respects_character_limit():
     assert manager.context.truncated_count > 0
 
 
+def test_context_compacts_single_large_failure_and_deduplicates_task():
+    """验证长失败证据会压缩，计划序列化不会重复保存完整任务文本。"""
+    task = "实现较长任务" * 50
+    manager = ContextManager(task, plan=create_task_plan(task), max_chars=4_000)
+    manager.add_tool_result(ToolResult.failure("开头" + "x" * 5_000 + "结尾"))
+
+    serialized = manager.context.to_dict()
+
+    assert "task" not in serialized["plan"]
+    assert len(manager.context.tool_results[0].error) <= 2_050
+    assert "开头" in manager.context.tool_results[0].error
+    assert "结尾" in manager.context.tool_results[0].error
+
+
 def test_context_validates_inputs():
     with pytest.raises(ValueError, match="任务文本不能为空"):
         ContextManager(" ")
