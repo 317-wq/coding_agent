@@ -169,6 +169,22 @@ class TaskSafetySession:
         self._completed_mutations.pop(key, None)
         return None
 
+    def task_created_file_exists(self, path: object) -> bool:
+        """判断路径是否为本任务从不存在状态创建且当前仍存在的普通文件。"""
+        if not isinstance(path, str):
+            return False
+        try:
+            snapshot = self.change_set.snapshot_store.get(path)
+            target = self.workspace.resolve(path)
+        except (OSError, ValueError):
+            return False
+        return (
+            snapshot is not None
+            and not snapshot.existed
+            and target.is_file()
+            and not target.is_symlink()
+        )
+
     def record_completed_mutation(
         self,
         tool_name: str,
