@@ -102,6 +102,8 @@ class GitReadTools:
 
         repository = inspect_git_repository(self.workspace)
         if not repository.available or repository.repository_root is None:
+            if repository.status.value == "not_repository":
+                return "当前工作区不是 Git 仓库，无法提供 Git 查询结果。"
             return f"错误：{repository.reason or 'Git 仓库不可用。'}"
 
         git_path = shutil.which("git")
