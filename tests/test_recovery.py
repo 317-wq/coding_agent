@@ -53,6 +53,33 @@ def test_test_failure_with_changes_prioritizes_repair():
     assert decision.triggers == ("测试失败", "计划失败")
 
 
+def test_first_plan_failure_with_changes_replans_before_rollback():
+    """验证单次计划失败保留有效修改并先尝试重新规划。"""
+    decision = decide_recovery(
+        RecoverySignals(
+            consecutive_tool_failures=1,
+            plan_failed=True,
+            recoverable_paths=("app/main.py",),
+        )
+    )
+
+    assert decision.action is RecoveryAction.REPLAN
+    assert decision.recoverable_paths == ("app/main.py",)
+
+
+def test_repeated_plan_failures_with_changes_request_rollback():
+    """验证连续失败达到阈值后才请求回滚已有修改。"""
+    decision = decide_recovery(
+        RecoverySignals(
+            consecutive_tool_failures=3,
+            plan_failed=True,
+            recoverable_paths=("app/main.py",),
+        )
+    )
+
+    assert decision.action is RecoveryAction.SUGGEST_ROLLBACK
+
+
 def test_test_repair_attempt_limit_requests_rollback_decision():
     decision = decide_recovery(
         RecoverySignals(
