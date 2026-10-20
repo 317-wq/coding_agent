@@ -1,16 +1,24 @@
 """基于 Typer 和 Rich 的命令行交互入口。"""
 
+import sys
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.console import Console
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.key_binding import KeyBindings
+from rich.console import Console, Group
+from rich.markup import escape
 from rich.panel import Panel
+from rich.rule import Rule
+from rich.text import Text
 
 from app import tools
 from app.cli.report import render_task_report
 from app.core.agent import Agent
+from app.core.task_result import TaskResult, TestEvidenceStatus
 from app.runtime.workspace import WorkspaceContext
 
 
@@ -31,13 +39,106 @@ app = typer.Typer(
 console = Console()
 
 
+class ProgressRenderer:
+    """将关键 Trace 事件转换为面向用户的简洁 Rich 进度。"""
+
+    def __init__(self, target_console: Console) -> None:
+        self.console = target_console
+        self.changed_paths: set[str] = set()
+        self.analysis_rendered = False
+        self.tests_rendered: set[str] = set()
+
+    def reset(self) -> None:
+        """开始新任务前清空已渲染的进度状态。"""
+        self.changed_paths.clear()
+        self.analysis_rendered = False
+        self.tests_rendered.clear()
+
+    def __call__(self, event: dict) -> None:
+        """消费一条结构化 Trace 事件并按需渲染里程碑。"""
+        name = event["event"]
+        details = event["details"]
+        if name == "complexity_decided" and not self.analysis_rendered:
+            self.analysis_rendered = True
+            self.console.print("[green]✓[/] [bold]分析任务[/]")
+        elif name == "mutation_applied":
+            path = details.get("path")
+            if path and path not in self.changed_paths:
+                self.changed_paths.add(path)
+                action = (
+                    "创建文件" if details.get("tool") == "create_file" else "更新文件"
+                )
+                self.console.print(
+                    f"[green]✓[/] [bold]{action}[/] [cyan]{escape(str(path))}[/]"
+                )
+        elif name == "tool_call_finished" and details.get("tool") == "run_tests":
+            target = _test_target(details)
+            status = details.get("status")
+            marker = f"{target}:{status}"
+            if marker not in self.tests_rendered:
+                self.tests_rendered.add(marker)
+                color = "green" if status == "success" else "yellow"
+                label = "测试通过" if status == "success" else "测试未通过，正在修复"
+                self.console.print(
+                    f"[{color}]✓[/] [bold]{label}[/] [dim]{escape(target)}[/]"
+                )
+
+
+def _test_target(details: dict) -> str:
+    """从测试工具结果中提取简短目标名称。"""
+    text = details.get("result") or details.get("error") or ""
+    for line in str(text).splitlines():
+        if line.startswith("测试目标："):
+            return line.removeprefix("测试目标：").strip()
+    return "pytest"
+
+
+def _input_bindings() -> KeyBindings:
+    """创建 Enter 提交、Shift/Alt+Enter 换行的编辑器按键绑定。"""
+    bindings = KeyBindings()
+
+    @bindings.add("enter")
+    def submit(event) -> None:
+        """普通 Enter 提交整个输入缓冲区。"""
+        event.current_buffer.validate_and_handle()
+
+    @bindings.add("escape", "[", "2", "7", ";", "2", ";", "1", "3", "~")
+    @bindings.add("escape", "[", "1", "3", ";", "2", "u")
+    @bindings.add("escape", "enter")
+    def insert_newline(event) -> None:
+        """处理 Alt+Enter 和常见增强终端的 Shift+Enter 序列。"""
+        event.current_buffer.insert_text("\n")
+
+    return bindings
+
+
+def _read_interactive_task() -> str | None:
+    """通过支持 bracketed paste 的单缓冲编辑器读取一个任务。"""
+    session: PromptSession[str] = PromptSession(
+        multiline=True,
+        key_bindings=_input_bindings(),
+        prompt_continuation=lambda *_: "  … ",
+    )
+    try:
+        value = session.prompt(
+            HTML("<ansicyan><b>用户任务</b></ansicyan>  "),
+            enable_open_in_editor=False,
+        )
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if value.strip().lower() in {"exit", "quit"}:
+        return "__EXIT__"
+    return value.strip()
+
+
 def _read_task() -> str | None:
-    """读取一条支持多行的任务；单独输入 exit/quit 退出程序。"""
+    """按终端能力读取任务，管道输入继续兼容 END 分隔格式。"""
+
+    if sys.stdin.isatty():
+        return _read_interactive_task()
 
     try:
-        first = console.input(
-            "\n[bold cyan]请输入编程任务[/]（输入 [bold]END[/] 结束多行任务）："
-        )
+        first = input()
     except (EOFError, KeyboardInterrupt):
         return None
 
@@ -49,7 +150,7 @@ def _read_task() -> str | None:
     lines = [first]
     while True:
         try:
-            line = console.input("[dim]...[/]")
+            line = input()
         except (EOFError, KeyboardInterrupt):
             return "\n".join(lines).strip()
         if line.strip() == "END":
@@ -66,11 +167,53 @@ def _resolve_workspace(path: Path) -> WorkspaceContext:
         raise typer.BadParameter(str(exc), param_hint="--workspace") from exc
 
 
+def _render_user_result(result: TaskResult) -> Group:
+    """生成不含底层 Trace 的默认用户结果视图。"""
+    status_style = "bold green" if result.completed else "bold yellow"
+    status_label = "✓ 任务完成" if result.completed else f"! 任务{result.status.value}"
+    blocks: list[Text] = [Text(status_label, style=status_style)]
+    if result.summary:
+        blocks.append(Text(result.summary))
+
+    changes = result.changes
+    paths = (
+        [("创建", path) for path in changes.created]
+        + [("修改", path) for path in changes.modified]
+        + [("删除", path) for path in changes.deleted]
+    )
+    if paths:
+        blocks.append(Text("\n文件变更", style="bold"))
+        for action, path in paths:
+            blocks.append(
+                Text.assemble(
+                    ("  ✓ ", "green"),
+                    (path, "bold cyan"),
+                    (f"  {action}", "dim"),
+                )
+            )
+
+    if result.tests:
+        blocks.append(Text("\n测试结果", style="bold"))
+        for evidence in result.tests:
+            passed = evidence.status is TestEvidenceStatus.PASSED
+            blocks.append(
+                Text.assemble(
+                    ("  ✓ " if passed else "  ! ", "green" if passed else "yellow"),
+                    (evidence.target, "cyan"),
+                    ("  通过" if passed else "  未通过", "dim"),
+                )
+            )
+    if result.stop_reason:
+        blocks.append(Text(f"\n{result.stop_reason}", style="yellow"))
+    return Group(*blocks)
+
+
 def _run_session(
     workspace: WorkspaceContext,
     output_format: OutputFormat,
     max_steps: int,
     max_tool_calls: int,
+    debug: bool,
 ) -> None:
     """运行可连续接收任务的交互式 Agent 会话。"""
 
@@ -78,14 +221,17 @@ def _run_session(
         Panel.fit(
             f"[bold]Mini Coding Agent[/]\n"
             f"工作目录：[cyan]{workspace.root}[/]\n"
-            "输入 [bold]exit[/] 或 [bold]quit[/] 退出程序",
+            "Enter 提交 · Shift+Enter / Alt+Enter 换行 · 输入 exit 退出",
             border_style="cyan",
         )
     )
+    progress = ProgressRenderer(console)
     agent = Agent(
         workspace=workspace,
         max_steps=max_steps,
         max_tool_calls=max_tool_calls,
+        debug=debug,
+        event_listener=None if debug else progress,
     )
 
     while True:
@@ -99,22 +245,37 @@ def _run_session(
         if not task.strip():
             continue
 
-        console.print("\n[cyan]开始执行任务，请稍候……[/]")
+        progress.reset()
+        console.print(Rule("[bold]用户任务[/]", style="dim"))
+        console.print(task)
+        console.print(Rule("[bold]执行进度[/]", style="dim"))
         try:
             result = agent.run(task)
-            report = (
-                render_task_report(agent.last_result, output_format.value)
-                if agent.last_result is not None
-                else result
-            )
+            report = None
+            if agent.last_result is not None:
+                report = render_task_report(agent.last_result, output_format.value)
             if output_format is OutputFormat.JSON:
-                console.print(report, markup=False, highlight=False, soft_wrap=True)
+                console.print(
+                    report or result,
+                    markup=False,
+                    highlight=False,
+                    soft_wrap=True,
+                )
             else:
+                content = (
+                    report or result
+                    if debug or agent.last_result is None
+                    else _render_user_result(agent.last_result)
+                )
                 console.print(
                     Panel(
-                        report,
+                        content,
                         title="[bold]任务执行结果[/]",
-                        border_style="green",
+                        border_style=(
+                            "green"
+                            if agent.last_result and agent.last_result.completed
+                            else "yellow"
+                        ),
                     )
                 )
         except KeyboardInterrupt:
@@ -156,6 +317,13 @@ def run(
             help="单个任务最大工具调用次数。",
         ),
     ] = 40,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            help="显示完整 Trace、模型轮次和工具调用日志。",
+        ),
+    ] = False,
 ) -> None:
     """解析参数并启动交互式 Agent 会话。"""
 
@@ -164,6 +332,7 @@ def run(
         output_format,
         max_steps,
         max_tool_calls,
+        debug,
     )
 
 
