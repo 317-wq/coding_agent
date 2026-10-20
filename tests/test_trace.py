@@ -5,9 +5,7 @@ from app.runtime.trace import REDACTED, ExecutionTrace
 
 def test_trace_records_workspace_and_structured_tool_statistics(tmp_path):
     trace = ExecutionTrace()
-    trace.record(
-        "task_started", task="inspect project", workspace=str(tmp_path)
-    )
+    trace.record("task_started", task="inspect project", workspace=str(tmp_path))
 
     for status in ("success", "failure", "cancelled"):
         trace.record("tool_call_started", tool=f"tool-{status}")
@@ -78,3 +76,26 @@ def test_trace_sanitizes_secrets_and_sensitive_file_paths():
     assert "abc.def" not in serialized
     assert "/tmp/project/.env" not in serialized
     assert serialized.count(REDACTED) >= 4
+
+
+def test_trace_is_quiet_by_default_and_verbose_in_debug_mode(capsys):
+    """验证默认记录但不刷屏，调试模式才输出 Trace。"""
+    quiet = ExecutionTrace()
+    quiet.record("task_started", task="quiet")
+    assert capsys.readouterr().out == ""
+
+    verbose = ExecutionTrace(verbose=True)
+    verbose.record("task_started", task="debug")
+    output = capsys.readouterr().out
+    assert "[Trace] task_started" in output
+    assert '"task": "debug"' in output
+
+
+def test_trace_notifies_progress_listener_without_losing_events():
+    """验证默认 UI 可消费事件且 Trace 仍保留完整证据。"""
+    received = []
+    trace = ExecutionTrace(event_listener=received.append)
+
+    trace.record("complexity_decided", complexity="complex")
+
+    assert received == trace.get_events()
