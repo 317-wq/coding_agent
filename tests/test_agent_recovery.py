@@ -56,10 +56,10 @@ def _registry(tmp_path, authorizer):
     return registry
 
 
-def test_agent_rolls_back_and_replans_after_failed_mutation(
+def test_agent_replans_before_rollback_after_first_failed_mutation(
     monkeypatch, tmp_path: Path
 ):
-    """验证工具失败但已落盘时记录实际修改，并在回滚后报告零净变化。"""
+    """验证首次工具失败但已落盘时保留修改，并先重新规划。"""
     target = tmp_path / "module.py"
     target.write_text("original", encoding="utf-8")
     authorizer = StubAuthorizer(AuthorizationDecision.allow())
@@ -76,7 +76,7 @@ def test_agent_rolls_back_and_replans_after_failed_mutation(
                 )
             if self.calls <= 4:
                 return _response(tool_calls=[_call("step", f"step-{self.calls}")])
-            assert "已授权回滚" in str(messages)
+            assert "已刷新项目状态并重新规划" in str(messages)
             return _response(content="恢复后完成")
 
     monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
@@ -85,11 +85,11 @@ def test_agent_rolls_back_and_replans_after_failed_mutation(
     result = agent.run("读取配置，然后修改代码，然后运行测试")
 
     assert result == "恢复后完成"
-    assert target.read_text(encoding="utf-8") == "original"
+    assert target.read_text(encoding="utf-8") == "broken"
     assert agent.last_recovery_decision.action is RecoveryAction.CONTINUE
-    assert agent.last_change_set.summary().changes == ()
+    assert agent.last_change_set.summary().modified_paths == ("module.py",)
     assert all(step.status.value == "completed" for step in agent.last_plan.steps)
-    assert authorizer.calls[0][0] == "rollback_task_changes"
+    assert authorizer.calls == []
     events = agent.last_trace.get_events()
     snapshot = next(event for event in events if event["event"] == "snapshot_created")
     mutation = next(event for event in events if event["event"] == "mutation_applied")
@@ -97,31 +97,19 @@ def test_agent_rolls_back_and_replans_after_failed_mutation(
         event
         for event in events
         if event["event"] == "recovery_decided"
-        and event["details"]["action"] == "suggest_rollback"
+        and event["details"]["action"] == "replan"
     )
-    rollback_event = next(
-        event for event in events if event["event"] == "rollback_finished"
-    )
-    rollback_summary = [
-        event
-        for event in events
-        if event["event"] == "change_set_updated"
-        and event["details"].get("reason") == "rollback_verified"
-    ][-1]
     assert snapshot["details"]["paths"] == ["module.py"]
     assert mutation["details"]["tool_status"] == "failure"
     assert mutation["details"]["net_change"] is True
     assert recovery_event["details"]["tool_call_id"] == "edit"
     assert recovery_event["details"]["recovery_id"] == "recovery-edit"
-    assert rollback_event["details"]["recovery_id"] == "recovery-edit"
+    assert not any(event["event"] == "rollback_finished" for event in events)
     assert not any(
         event["event"] == "recovery_decided"
         and event["details"]["action"] == "continue"
         for event in events
     )
-    assert rollback_summary["details"]["comparison_basis"] == "task_initial_state"
-    assert rollback_summary["details"]["net_changed_count"] == 0
-    assert rollback_summary["details"]["modified_paths"] == []
 
 
 def test_agent_preserves_changes_and_requests_confirmation_when_rollback_is_denied(
@@ -230,6 +218,8 @@ def test_agent_repairs_code_import_error_and_reruns_tests(
     assert test_runs == 2
     assert agent.last_result.completed is True
     assert agent.last_result.repair_attempts == 1
+    assert len(agent.last_result.tests) == 1
+    assert agent.last_result.tests[0].status.value == "passed"
     events = agent.last_trace.get_events()
     recovery = next(
         event
@@ -239,6 +229,89 @@ def test_agent_repairs_code_import_error_and_reruns_tests(
     )
     assert "项目代码导入失败" in recovery["details"]["reason"]
     assert not any(event["event"] == "rollback_finished" for event in events)
+
+
+def test_agent_stops_after_rollback_when_test_repair_budget_is_exhausted(
+    monkeypatch, tmp_path: Path
+):
+    """验证两次测试修复仍失败时只回滚一次，并停止重复执行任务。"""
+    target = tmp_path / "module.py"
+    target.write_text("original", encoding="utf-8")
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_module.py").write_text("def test_value(): pass\n", encoding="utf-8")
+    authorizer = StubAuthorizer(AuthorizationDecision.allow())
+    registry = ToolRegistry(authorizer=authorizer)
+
+    def run_tests(test_path="."):
+        """持续返回断言失败，触发两次实现修复上限。"""
+        return ToolResult.failure(
+            f"测试目标：{test_path}\n测试退出码：1\n"
+            "测试结果：失败\n测试错误类型：断言失败\n"
+            "FAILED tests/test_module.py::test_value"
+        )
+
+    edit_count = 0
+
+    def edit_file(path):
+        """每次修复都产生可检测的业务实现修改。"""
+        nonlocal edit_count
+        edit_count += 1
+        target.write_text(f"repair-{edit_count}", encoding="utf-8")
+        return "修改成功"
+
+    registry.register(
+        ToolSpec(
+            "run_tests",
+            "运行测试",
+            {
+                "type": "object",
+                "properties": {"test_path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            run_tests,
+        )
+    )
+    registry.register(ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, edit_file))
+
+    class FakeModel:
+        """按失败、修复、重跑两轮的顺序返回动作。"""
+
+        calls = 0
+
+        def chat(self, messages, tools):
+            self.calls += 1
+            if self.calls in {1, 3, 5}:
+                return _response(
+                    tool_calls=[
+                        _call(
+                            "run_tests",
+                            f"test-{self.calls}",
+                            '{"test_path":"tests"}',
+                        )
+                    ]
+                )
+            return _response(
+                tool_calls=[
+                    _call(
+                        "edit_file",
+                        f"edit-{self.calls}",
+                        '{"path":"module.py"}',
+                    )
+                ]
+            )
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    result = agent.run("修复 module.py 并运行 tests 回归测试")
+
+    assert "不再从初始状态重复执行" in result
+    assert target.read_text(encoding="utf-8") == "original"
+    assert [call[0] for call in authorizer.calls] == ["rollback_task_changes"]
+    events = agent.last_trace.get_events()
+    assert sum(event["event"] == "rollback_finished" for event in events) == 1
+    assert events[-2]["event"] == "task_stopped"
 
 
 def test_simple_task_can_create_recovery_plan_after_test_failure(
