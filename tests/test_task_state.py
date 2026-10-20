@@ -88,6 +88,59 @@ def test_delete_file_completes_matching_implementation_step():
     )
 
 
+def test_multi_file_implementation_stays_running_until_test_phase():
+    """验证首个业务文件只能启动实现阶段，不能提前宣告整体实现完成。"""
+    manager = PlanStateManager(
+        create_task_plan("实现完整功能，然后编写测试，然后运行测试")
+    )
+    implementation = manager.match_step(
+        "create_file", {"path": "todo_cli/models.py"}
+    )
+    assert implementation is not None
+    manager.start_step(implementation)
+
+    class SuccessResult:
+        """提供计划阶段测试所需的成功工具结果。"""
+
+        status = "success"
+
+    assert not manager.can_complete_step(
+        implementation,
+        "create_file",
+        {"path": "todo_cli/models.py"},
+        SuccessResult(),
+    )
+    assert manager.state().plan.steps[implementation - 1].status is PlanStepStatus.RUNNING
+    assert manager.should_advance_for_tool(
+        implementation,
+        "create_file",
+        {"path": "tests/test_todo_cli.py"},
+    )
+
+
+def test_test_authoring_stays_running_until_tests_execute():
+    """验证创建一个测试文件后仍处于编写阶段，运行测试时才可推进。"""
+    manager = PlanStateManager(create_task_plan("编写完整测试，然后运行测试"))
+    authoring = manager.match_step(
+        "create_file", {"path": "tests/test_todo_cli.py"}
+    )
+    assert authoring is not None
+    manager.start_step(authoring)
+
+    class SuccessResult:
+        """提供计划阶段测试所需的成功工具结果。"""
+
+        status = "success"
+
+    assert not manager.can_complete_step(
+        authoring,
+        "create_file",
+        {"path": "tests/test_todo_cli.py"},
+        SuccessResult(),
+    )
+    assert manager.should_advance_for_tool(authoring, "run_tests", {"test_path": "."})
+
+
 def test_step_can_start_and_complete_without_mutating_old_plan(manager):
     original = manager.state().plan
     manager.start_step(1)
