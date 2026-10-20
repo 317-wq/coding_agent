@@ -547,6 +547,17 @@ class Agent:
                                 modified_paths=post_rollback.modified_paths,
                                 deleted_paths=post_rollback.deleted_paths,
                             )
+                            if safety.test_repair_attempts >= 2:
+                                reason = (
+                                    "测试自动修复已达到上限，当前任务变更已回滚；"
+                                    "任务停止，不再从初始状态重复执行。"
+                                )
+                                trace.record(
+                                    "task_stopped",
+                                    reason=reason,
+                                    completion_check_id=completion_check_id,
+                                )
+                                return reason
                             safety.reset_after_recovery(rollback.status)
                             self.last_change_set = safety.change_set
                             project_snapshot = ProjectExplorer(self.workspace).explore()
@@ -1168,6 +1179,18 @@ class Agent:
                         modified_paths=post_rollback.modified_paths,
                         deleted_paths=post_rollback.deleted_paths,
                     )
+                    if safety.test_repair_attempts >= 2:
+                        reason = (
+                            "测试自动修复已达到上限，当前任务变更已回滚；"
+                            "任务停止，不再从初始状态重复执行。"
+                        )
+                        trace.record(
+                            "task_stopped",
+                            reason=reason,
+                            recovery_id=recovery_id,
+                            tool_call_id=tool_call.id,
+                        )
+                        return reason
                     safety.reset_after_recovery(rollback.status)
                     self.last_change_set = safety.change_set
                     project_snapshot = ProjectExplorer(self.workspace).explore()
