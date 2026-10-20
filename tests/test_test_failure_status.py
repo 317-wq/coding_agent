@@ -156,3 +156,13 @@ def test_edit_file_is_idempotent_when_target_content_already_exists(tmp_path: Pa
     assert "修改文件成功" in first
     assert "无需修改" in second
     assert target.read_text(encoding="utf-8").count("return 43") == 1
+
+
+def test_create_file_reports_verified_disk_content(tmp_path: Path):
+    """验证创建工具只有在磁盘内容与请求一致时才报告已核验成功。"""
+    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
+
+    result = tools.create_file("module.py", "VALUE = 1\n")
+
+    assert result == "创建文件成功并已核验：module.py"
+    assert (tmp_path / "module.py").read_text(encoding="utf-8") == "VALUE = 1\n"
