@@ -8,6 +8,17 @@ from app.core.planner import TaskPlan
 from app.runtime.explorer import ProjectSnapshot
 from app.tools.result import ToolResult, ToolStatus
 
+MAX_CONTEXT_ENTRY_CHARS = 2_000
+
+
+def _compact_text(value: str | None) -> str | None:
+    """保留长证据的开头和结尾，避免单条输出耗尽上下文预算。"""
+    if value is None or len(value) <= MAX_CONTEXT_ENTRY_CHARS:
+        return value
+    half = (MAX_CONTEXT_ENTRY_CHARS - 40) // 2
+    removed = len(value) - (half * 2)
+    return f"{value[:half]}\n...[省略 {removed} 字符]...\n{value[-half:]}"
+
 
 @dataclass(frozen=True)
 class TaskContext:
@@ -23,6 +34,10 @@ class TaskContext:
 
     def to_dict(self) -> dict[str, Any]:
         snapshot = self.project_snapshot
+        plan = self.plan.to_dict() if self.plan is not None else None
+        if plan is not None:
+            # task 已在顶层保留，避免长任务在上下文中重复一份。
+            plan.pop("task", None)
         return {
             "task": self.task,
             "project_snapshot": (
@@ -40,7 +55,7 @@ class TaskContext:
                 if snapshot is not None
                 else None
             ),
-            "plan": self.plan.to_dict() if self.plan is not None else None,
+            "plan": plan,
             "current_step_id": self.current_step_id,
             "tool_results": [result.to_dict() for result in self.tool_results],
             "test_results": list(self.test_results),
@@ -93,9 +108,14 @@ class ContextManager:
     def add_tool_result(self, result: ToolResult) -> TaskContext:
         if not isinstance(result, ToolResult):
             raise TypeError("工具结果必须是 ToolResult。")
+        compact = replace(
+            result,
+            result=_compact_text(result.result),
+            error=_compact_text(result.error),
+        )
         self._context = replace(
             self._context,
-            tool_results=(*self._context.tool_results, result),
+            tool_results=(*self._context.tool_results, compact),
         )
         self._trim()
         return self._context
@@ -105,7 +125,10 @@ class ContextManager:
             raise ValueError("测试结果不能为空。")
         self._context = replace(
             self._context,
-            test_results=(*self._context.test_results, result.strip()),
+            test_results=(
+                *self._context.test_results,
+                _compact_text(result.strip()) or "",
+            ),
         )
         self._trim()
         return self._context
