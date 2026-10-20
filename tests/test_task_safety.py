@@ -111,6 +111,23 @@ def test_first_test_failure_starts_repair_without_rollback(tmp_path: Path):
     assert session.test_repair_attempts == 0
 
 
+def test_no_tests_failure_does_not_force_immediate_rerun(tmp_path: Path):
+    """验证未发现测试时允许先编写用例，不进入修改后强制重跑门控。"""
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    result = ToolResult.failure(
+        "测试目标：.\n测试退出码：5\n测试结果：失败\n"
+        "测试错误类型：未发现测试\nno tests ran"
+    )
+
+    decision = session.observe("run_tests", result, arguments={"test_path": "."})
+    (tmp_path / "test_sample.py").write_text("def test_ok(): pass\n", encoding="utf-8")
+    session.record_mutation_applied("test_sample.py")
+
+    assert decision.action is RecoveryAction.REPLAN
+    assert session.pending_test_rerun_target() is None
+    assert session.test_repair_attempts == 0
+
+
 def test_successful_rerun_after_mutation_counts_as_repair_attempt(tmp_path: Path):
     """验证失败基线后的代码修改和成功重跑计为一轮自动修复。"""
     target = tmp_path / "module.py"
