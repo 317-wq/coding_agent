@@ -65,9 +65,13 @@ class ProgressRenderer:
             path = details.get("path")
             if path and path not in self.changed_paths:
                 self.changed_paths.add(path)
-                action = (
-                    "创建文件" if details.get("tool") == "create_file" else "更新文件"
-                )
+                action = {
+                    "create_directory": "创建目录",
+                    "create_file": "创建文件",
+                    "delete_directory": "删除目录",
+                    "delete_file": "删除文件",
+                    "edit_file": "更新文件",
+                }.get(details.get("tool"), "更新文件")
                 self.console.print(
                     f"[green]✓[/] [bold]{action}[/] [cyan]{escape(str(path))}[/]"
                 )
@@ -77,10 +81,12 @@ class ProgressRenderer:
             marker = f"{target}:{status}"
             if marker not in self.tests_rendered:
                 self.tests_rendered.add(marker)
-                color = "green" if status == "success" else "yellow"
+                passed = status == "success"
+                color = "green" if passed else "yellow"
+                symbol = "✓" if passed else "!"
                 label = "测试通过" if status == "success" else "测试未通过，正在修复"
                 self.console.print(
-                    f"[{color}]✓[/] [bold]{label}[/] [dim]{escape(target)}[/]"
+                    f"[{color}]{symbol}[/] [bold]{label}[/] [dim]{escape(target)}[/]"
                 )
 
 
@@ -91,6 +97,14 @@ def _test_target(details: dict) -> str:
         if line.startswith("测试目标："):
             return line.removeprefix("测试目标：").strip()
     return "pytest"
+
+
+def _display_result_text(value: str) -> str:
+    """将内部停止原因转换为面向用户的中文说明。"""
+    return {
+        "max_steps": "已达到最大执行轮数，任务尚未完成。",
+        "max_tool_calls": "已达到最大工具调用次数，任务尚未完成。",
+    }.get(value, value)
 
 
 def _input_bindings() -> KeyBindings:
@@ -170,10 +184,15 @@ def _resolve_workspace(path: Path) -> WorkspaceContext:
 def _render_user_result(result: TaskResult) -> Group:
     """生成不含底层 Trace 的默认用户结果视图。"""
     status_style = "bold green" if result.completed else "bold yellow"
-    status_label = "✓ 任务完成" if result.completed else f"! 任务{result.status.value}"
+    status_label = {
+        "completed": "✓ 任务完成",
+        "stopped": "! 任务已停止",
+        "failed": "! 任务失败",
+        "blocked": "! 任务受阻",
+    }[result.status.value]
     blocks: list[Text] = [Text(status_label, style=status_style)]
     if result.summary:
-        blocks.append(Text(result.summary))
+        blocks.append(Text(_display_result_text(result.summary)))
 
     changes = result.changes
     paths = (
@@ -203,8 +222,10 @@ def _render_user_result(result: TaskResult) -> Group:
                     ("  通过" if passed else "  未通过", "dim"),
                 )
             )
-    if result.stop_reason:
-        blocks.append(Text(f"\n{result.stop_reason}", style="yellow"))
+    if result.stop_reason and result.stop_reason != result.summary:
+        blocks.append(
+            Text(f"\n{_display_result_text(result.stop_reason)}", style="yellow")
+        )
     return Group(*blocks)
 
 
