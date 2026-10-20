@@ -227,10 +227,35 @@ class Agent:
             request_id = f"model-{step}"
             trace.record("model_request_started", step=step, request_id=request_id)
 
+            available_tools = self.registry.model_definitions()
+            forced_rerun_target = safety.pending_test_rerun_target()
+            if forced_rerun_target is not None:
+                available_tools = [
+                    definition
+                    for definition in available_tools
+                    if definition["function"]["name"] == "run_tests"
+                ]
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "控制层检测到失败测试后的修改尚未验证。"
+                            "本轮唯一允许的动作是调用 run_tests 重新运行目标 "
+                            f"`{forced_rerun_target}`；不要调用其他工具或直接总结。"
+                        ),
+                    }
+                )
+                trace.record(
+                    "test_rerun_enforced",
+                    request_id=request_id,
+                    test_target=forced_rerun_target,
+                    allowed_tools=("run_tests",),
+                )
+
             try:
                 response = self.model.chat(
                     messages=messages,
-                    tools=self.registry.model_definitions(),
+                    tools=available_tools,
                 )
             except KeyboardInterrupt:
                 trace.record(
@@ -855,6 +880,23 @@ class Agent:
                         )
                 if state_manager is not None:
                     current = state_manager.state().current_step_id
+                    if (
+                        current is not None
+                        and tool_result.status is ToolStatus.SUCCESS
+                        and state_manager.should_advance_for_tool(
+                            current, tool_name, arguments
+                        )
+                    ):
+                        state_manager.complete_step(current, tool_result.result)
+                        self.last_plan = state_manager.state().plan
+                        trace.record(
+                            "plan_step_status_changed",
+                            tool_call_id=tool_call.id,
+                            step_id=current,
+                            status="completed",
+                            reason="后续阶段已开始",
+                        )
+                        current = None
                     if current is None:
                         pending = state_manager.match_step(tool_name, arguments)
                         if pending is not None:
