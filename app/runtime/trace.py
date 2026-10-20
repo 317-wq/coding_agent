@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -50,17 +51,15 @@ SECRET_VALUE_PATTERN = re.compile(
     """
 )
 
-BEARER_PATTERN = re.compile(
-    r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"
-)
+BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
 
 SENSITIVE_FILE_PATTERN = re.compile(
-    r'''(?ix)
+    r"""(?ix)
     (?<![\w.-])
     (?:[^\s"'=,;<>]*[/\\])?
     \.env(?:\.(?:local|production|development))?
     (?![\w.-])
-    '''
+    """
 )
 
 
@@ -68,9 +67,7 @@ def _sanitize_string(value: str) -> str:
     """过滤常见密钥形式，并限制字符串长度。"""
     value = BEARER_PATTERN.sub(f"Bearer {REDACTED}", value)
     value = SECRET_VALUE_PATTERN.sub(
-        lambda match: (
-            f"{match.group(1)}{match.group(2)}{REDACTED}"
-        ),
+        lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}",
         value,
     )
     value = SENSITIVE_FILE_PATTERN.sub(REDACTED, value)
@@ -125,15 +122,10 @@ def _sanitize(
         return result
 
     if isinstance(value, (list, tuple)):
-        result = [
-            _sanitize(item, depth=depth + 1)
-            for item in value[:MAX_ITEMS]
-        ]
+        result = [_sanitize(item, depth=depth + 1) for item in value[:MAX_ITEMS]]
 
         if len(value) > MAX_ITEMS:
-            result.append(
-                f"{TRUNCATED} 其余 {len(value) - MAX_ITEMS} 项已省略"
-            )
+            result.append(f"{TRUNCATED} 其余 {len(value) - MAX_ITEMS} 项已省略")
 
         return result
 
@@ -146,10 +138,18 @@ def _sanitize(
 class ExecutionTrace:
     """记录单次 Agent 任务的执行事件和统计信息。"""
 
-    def __init__(self, trace_id: str | None = None) -> None:
+    def __init__(
+        self,
+        trace_id: str | None = None,
+        *,
+        verbose: bool = False,
+        event_listener: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         """创建带稳定关联标识和递增事件序号的任务 Trace。"""
         self.trace_id = trace_id or uuid4().hex
         self.events: list[dict[str, Any]] = []
+        self.verbose = verbose
+        self.event_listener = event_listener
 
     def record(self, event_type: str, **details: Any) -> None:
         """清理事件详情后保存，并输出一条终端日志。"""
@@ -164,12 +164,20 @@ class ExecutionTrace:
         }
         self.events.append(event)
 
-        content = json.dumps(
-            safe_details,
-            ensure_ascii=False,
-            default=str,
-        )
-        print(f"[Trace] {event['event']}: {content}")
+        if self.event_listener is not None:
+            try:
+                self.event_listener(event)
+            except Exception as exc:  # noqa: BLE001 - optional UI boundary
+                if self.verbose:
+                    print(f"[Trace Listener Error] {exc}")
+
+        if self.verbose:
+            content = json.dumps(
+                safe_details,
+                ensure_ascii=False,
+                default=str,
+            )
+            print(f"[Trace] {event['event']}: {content}")
 
     def get_events(self) -> list[dict[str, Any]]:
         """返回当前任务的事件记录副本。"""
@@ -232,10 +240,7 @@ class ExecutionTrace:
 
     def _get_tool_statistics(self) -> dict[str, int]:
         """按结构化状态统计工具调用结果。"""
-        started = sum(
-            event["event"] == "tool_call_started"
-            for event in self.events
-        )
+        started = sum(event["event"] == "tool_call_started" for event in self.events)
 
         succeeded = 0
         failed = 0
@@ -304,8 +309,7 @@ class ExecutionTrace:
             "workspace": self._get_workspace(),
             "duration_seconds": self._get_duration(),
             "model_requests": sum(
-                event["event"] == "model_request_started"
-                for event in self.events
+                event["event"] == "model_request_started" for event in self.events
             ),
             "tool_calls": self._get_tool_statistics(),
             "total_events": len(self.events),
