@@ -9,7 +9,7 @@ from app.core.task_result import (
     TestEvidenceStatus,
     ToolCallSummary,
 )
-from app.core.test_evidence import summarize_test_evidence
+from app.core.test_evidence import latest_test_evidence, summarize_test_evidence
 from app.runtime.trace import ExecutionTrace
 from app.runtime.workspace import WorkspaceContext
 from app.tools.change_set import ChangeSetSummary, TaskChangeSet
@@ -144,4 +144,4 @@ class FinalStateVerifier:
                     output=item.output,
                 )
             evidence.append(item)
-        return tuple(evidence)
+        return latest_test_evidence(evidence)
