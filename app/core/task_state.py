@@ -122,14 +122,18 @@ class PlanStateManager:
         if "阅读" in text or "读取" in text or "项目结构" in text:
             return tool_name in {"list_files", "read_file", "search_code"}
         if "编写" in text or "补充" in text:
-            return tool_name in {"create_file", "edit_file"} and self._is_test_source_path(path)
+            return (
+                tool_name in {"create_file", "edit_file"}
+                and self._is_test_source_path(path)
+                and not self._has_later_test_execution_step(step_id)
+            )
         if "运行" in text or "验证" in text:
             return tool_name == "run_tests"
         if any(
             word in text
             for word in ("实现", "修改", "修复", "创建", "新增", "删除", "功能")
         ):
-            return tool_name in {
+            mutation_matches = tool_name in {
                 "create_file",
                 "edit_file",
                 "delete_file",
@@ -137,7 +141,38 @@ class PlanStateManager:
             } and not (
                 path.startswith("tests/") or "/tests/" in path
             )
+            if not mutation_matches:
+                return False
+            if tool_name in {"delete_file", "delete_directory"} and "删除" in text:
+                return True
+            return not self._has_later_development_step(step_id)
         return tool_name in {"create_file", "edit_file", "run_tests"}
+
+    def should_advance_for_tool(
+        self, step_id: int, tool_name: str, arguments: dict[str, Any]
+    ) -> bool:
+        """判断新工具是否证明当前阶段已结束并进入后续阶段。"""
+        current = self._step(step_id)
+        if current.status is not PlanStepStatus.RUNNING:
+            return False
+        matched = self.match_step(tool_name, arguments)
+        return matched is not None and matched > step_id
+
+    def _has_later_development_step(self, step_id: int) -> bool:
+        """判断实现步骤之后是否还有测试编写或执行验收阶段。"""
+        return any(
+            step.step_id > step_id
+            and any(word in step.objective for word in ("编写", "补充", "运行", "验证"))
+            for step in self._plan.steps
+        )
+
+    def _has_later_test_execution_step(self, step_id: int) -> bool:
+        """判断测试编写步骤之后是否还有真实测试执行阶段。"""
+        return any(
+            step.step_id > step_id
+            and any(word in step.objective for word in ("运行", "验证"))
+            for step in self._plan.steps
+        )
 
     @staticmethod
     def _is_test_source_path(path: str) -> bool:
