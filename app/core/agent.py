@@ -1139,6 +1139,36 @@ class Agent:
                     )
                     break
 
+        if self.last_plan is not None and self.last_context is not None:
+            final_decision = verify_completion(
+                self.last_context.context.plan or self.last_plan,
+                self.last_context.context.tool_results,
+                self.last_context.context.test_results,
+            )
+            requirement_check = TaskRequirementVerifier().verify(task, self.workspace)
+            trace.record(
+                "completion_checked",
+                completion_check_id="completion-step-limit",
+                status=final_decision.status.value,
+                completed=final_decision.completed,
+                reason=final_decision.reason,
+                pending_step_ids=final_decision.pending_step_ids,
+                failed_step_ids=final_decision.failed_step_ids,
+                evidence=final_decision.evidence,
+                trigger="step_limit_boundary",
+            )
+            if final_decision.completed and requirement_check.passed:
+                answer = (
+                    "最后一个允许轮次中的工具已完成任务，"
+                    "控制层已根据计划、测试和明确需求证据完成收尾核验。"
+                )
+                trace.record(
+                    "task_completed",
+                    answer=answer,
+                    reason="verified_at_step_limit",
+                )
+                return answer
+
         trace.record(
             "task_stopped",
             reason="max_steps",
