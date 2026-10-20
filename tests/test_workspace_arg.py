@@ -119,3 +119,50 @@ def test_default_result_view_omits_trace_details():
     assert "tests" in output
     assert "Trace" not in output
     assert "42" not in output
+
+
+def test_default_result_view_localizes_stopped_status_without_duplicate_reason():
+    """验证停止状态使用中文，并避免摘要和原因重复显示。"""
+    result = TaskResult(
+        task="创建页面",
+        status=TaskStatus.STOPPED,
+        summary="max_steps",
+        stop_reason="max_steps",
+    )
+
+    with main.console.capture() as capture:
+        main.console.print(main._render_user_result(result))
+    output = capture.get()
+
+    assert "任务已停止" in output
+    assert "任务stopped" not in output
+    assert "已达到最大执行轮数，任务尚未完成。" in output
+    assert "max_steps" not in output
+
+
+def test_progress_renderer_distinguishes_directories_and_failed_tests():
+    """验证默认进度正确标注目录创建和测试失败。"""
+    renderer = main.ProgressRenderer(main.console)
+
+    with main.console.capture() as capture:
+        renderer(
+            {
+                "event": "mutation_applied",
+                "details": {"tool": "create_directory", "path": "expense_tracker"},
+            }
+        )
+        renderer(
+            {
+                "event": "tool_call_finished",
+                "details": {
+                    "tool": "run_tests",
+                    "status": "failure",
+                    "error": "测试目标：.\n测试结果：失败",
+                },
+            }
+        )
+    output = capture.get()
+
+    assert "创建目录 expense_tracker" in output
+    assert "! 测试未通过" in output
+    assert "✓ 测试未通过" not in output
