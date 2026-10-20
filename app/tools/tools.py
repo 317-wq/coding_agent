@@ -566,7 +566,9 @@ def run_tests(test_path: str = ".") -> str:
         error_kind = ""
         if result.returncode != 0:
             lowered = output.lower()
-            if (
+            if result.returncode == 5 or "no tests ran" in lowered:
+                error_kind = "测试错误类型：未发现测试\n"
+            elif (
                 "no module named pytest" in lowered
                 or "timeout" in lowered
                 or "测试执行失败" in lowered
