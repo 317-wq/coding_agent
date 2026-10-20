@@ -614,6 +614,64 @@ def test_agent_keeps_step_limit(monkeypatch, tmp_path: Path):
     assert agent.run("测试轮数上限").startswith("已达到最大执行轮数 1")
 
 
+def test_agent_completes_when_final_allowed_round_finishes_plan(
+    monkeypatch, tmp_path: Path
+):
+    """验证最后一轮工具完成计划时无需额外模型总结轮次。"""
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            "list_files",
+            "读取目录",
+            {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            lambda path=".": "目录为空",
+        )
+    )
+    registry.register(
+        ToolSpec(
+            "run_tests",
+            "运行测试",
+            {
+                "type": "object",
+                "properties": {"test_path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            lambda test_path=".": (
+                f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过\n1 passed"
+            ),
+        )
+    )
+
+    class FakeModel:
+        """在唯一允许轮次内依次读取项目并运行测试。"""
+
+        def chat(self, messages, tools):
+            return make_response(
+                tool_calls=[
+                    make_tool_call("list_files", "list", '{"path":"."}'),
+                    make_tool_call("run_tests", "test", '{"test_path":"."}'),
+                ]
+            )
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), max_steps=1, registry=registry)
+
+    result = agent.run(
+        "先阅读现有项目结构，然后运行完整测试并记录实际测试结果，确认项目状态。"
+    )
+
+    assert "收尾核验" in result
+    assert agent.last_result.completed is True
+    terminal = [
+        event for event in agent.last_trace.get_events() if event["event"] == "task_completed"
+    ]
+    assert terminal[-1]["details"]["reason"] == "verified_at_step_limit"
+
+
 def test_agent_uses_larger_default_execution_limits(tmp_path: Path):
     """验证默认轮数和工具调用数足以支持多轮诊断修复。"""
     agent = Agent(WorkspaceContext.from_path(tmp_path))
