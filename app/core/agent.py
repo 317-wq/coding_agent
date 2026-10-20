@@ -971,7 +971,6 @@ class Agent:
                     current = state_manager.state().current_step_id
                     if (
                         current is not None
-                        and tool_result.status is ToolStatus.SUCCESS
                         and state_manager.should_advance_for_tool(
                             current, tool_name, arguments
                         )
