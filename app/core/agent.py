@@ -56,6 +56,9 @@ SYSTEM_PROMPT = """
 11. 完成任务后，用中文总结修改了哪些文件、做了什么，以及测试结果。
 12. 不要直接把需要执行的代码当成最终答案，应使用工具实际创建或修改文件。
 13. 同一批次的工具调用按顺序执行；任一调用失败或取消后，停止该批次剩余调用并重新判断任务状态。
+14. create_file 和 edit_file 成功时已经核验落盘；不要紧接着 read_file 只为确认同一路径。
+15. 不要重复创建已经成功创建的目录或文件；互不依赖的工具调用尽量在同一响应中按顺序批量给出。
+16. 开发任务尚未创建测试源文件时先完成实现和测试编写，不要对空工作区运行 pytest。
 """
 
 
@@ -250,6 +253,32 @@ class Agent:
                     request_id=request_id,
                     test_target=forced_rerun_target,
                     allowed_tools=("run_tests",),
+                )
+            elif (
+                state_manager is not None
+                and state_manager.should_defer_tests_without_sources()
+                and not self._has_test_sources()
+            ):
+                available_tools = [
+                    definition
+                    for definition in available_tools
+                    if definition["function"]["name"] != "run_tests"
+                ]
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "当前开发计划尚未创建任何测试源文件，run_tests 暂不可用。"
+                            "请先完成业务实现并创建 test_*.py 或 conftest.py，"
+                            "不要对空工作区运行测试。"
+                        ),
+                    }
+                )
+                trace.record(
+                    "tool_availability_constrained",
+                    request_id=request_id,
+                    unavailable_tools=("run_tests",),
+                    reason="开发任务尚未创建测试源文件。",
                 )
 
             try:
@@ -574,19 +603,6 @@ class Agent:
 
             # 按顺序执行工具调用。
             for call_index, tool_call in enumerate(message.tool_calls):
-                if tool_call_count >= self.max_tool_calls:
-                    reason = (
-                        f"已达到工具调用上限 {self.max_tool_calls}，"
-                        "停止执行。请缩小任务范围后重试。"
-                    )
-                    trace.record(
-                        "task_stopped",
-                        reason="max_tool_calls",
-                        limit=self.max_tool_calls,
-                        request_id=request_id,
-                    )
-                    return reason
-
                 tool_name = tool_call.function.name
 
                 try:
@@ -644,7 +660,10 @@ class Agent:
 
                 cached_result = safety.completed_mutation(tool_name, arguments)
                 if cached_result is not None:
-                    tool_call_count += 1
+                    if tool_name == "create_directory":
+                        cached_result = ToolResult.success(
+                            f"无需创建，目录已存在：{arguments.get('path', '')}"
+                        )
                     trace.record(
                         "duplicate_tool_call_skipped",
                         tool=tool_name,
@@ -672,7 +691,29 @@ class Agent:
                             "content": result_json,
                         }
                     )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "该写操作已经成功完成且目标状态仍然成立，"
+                                "不要再次请求相同操作；请继续下一个未完成目标。"
+                            ),
+                        }
+                    )
                     continue
+
+                if tool_call_count >= self.max_tool_calls:
+                    reason = (
+                        f"已达到工具调用上限 {self.max_tool_calls}，"
+                        "停止执行。请缩小任务范围后重试。"
+                    )
+                    trace.record(
+                        "task_stopped",
+                        reason="max_tool_calls",
+                        limit=self.max_tool_calls,
+                        request_id=request_id,
+                    )
+                    return reason
 
                 rerun_block_reason = safety.test_rerun_block_reason(
                     tool_name, arguments
@@ -1186,3 +1227,14 @@ class Agent:
         message = result.error or ""
         markers = ("工作目录之外", "工作区之外", "路径越界", "符号链接")
         return any(marker in message for marker in markers)
+
+    def _has_test_sources(self) -> bool:
+        """检查工作区是否已经存在可被 pytest 收集的测试源文件。"""
+        ignored = {".git", ".venv", ".pytest_cache", "__pycache__"}
+        for path in self.workspace.root.rglob("*.py"):
+            relative = path.relative_to(self.workspace.root)
+            if any(part in ignored for part in relative.parts):
+                continue
+            if path.name == "conftest.py" or path.name.startswith("test_"):
+                return True
+        return False
