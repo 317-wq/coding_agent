@@ -50,11 +50,13 @@ GPT_CHAT_MODEL=your-model
 
 ## 运行
 
-启动交互式 Agent：
+推荐直接使用项目命令启动交互式 Agent：
 
 ```bash
-uv run python -m app.cli.main --workspace ./workspace/demo
+uv run coding-agent --workspace ./workspace/demo
 ```
+
+仍可使用模块形式：`uv run python -m app.cli.main --workspace ./workspace/demo`。
 
 启动后输入任务，输入单独一行 `END` 提交多行任务；输入 `exit` 或 `quit` 退出。
 
@@ -62,12 +64,12 @@ uv run python -m app.cli.main --workspace ./workspace/demo
 
 ```bash
 # 输出 JSON 报告
-uv run python -m app.cli.main \
+uv run coding-agent \
   --workspace ./workspace/demo \
   --output-format json
 
 # 增大复杂任务的执行资源上限
-uv run python -m app.cli.main \
+uv run coding-agent \
   --workspace ./workspace/demo \
   --max-steps 50 \
   --max-tool-calls 120
@@ -78,7 +80,7 @@ uv run python -m app.cli.main \
 不想手动输入 `END` 时，可以使用 Shell here-document：
 
 ```bash
-uv run python -m app.cli.main --workspace ./workspace/demo <<'TASK'
+uv run coding-agent --workspace ./workspace/demo <<'TASK'
 实现用户登录功能，并补充 pytest 测试，运行测试确认通过。
 END
 TASK
@@ -90,7 +92,7 @@ TASK
 #!/usr/bin/env bash
 set -euo pipefail
 
-uv run python -m app.cli.main \
+uv run coding-agent \
   --workspace "${1:-./workspace/demo}" \
   --max-steps 50 \
   --max-tool-calls 120 <<'TASK'
