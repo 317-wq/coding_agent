@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 workspace/
 tests/
+.pytest_cache/
+.ruff_cache/
+diagram/
