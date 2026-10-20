@@ -63,6 +63,31 @@ def test_trace_records_planning_state_and_completion_events(monkeypatch, tmp_pat
     assert completion["details"]["completed"] is True
 
 
+def test_agent_logs_are_only_printed_in_debug_mode(monkeypatch, tmp_path, capsys):
+    """验证默认 Agent 不刷底层日志，调试模式恢复完整执行输出。"""
+
+    class FakeModel:
+        """返回无需工具调用的确定性完成结果。"""
+
+        def chat(self, messages, tools):
+            return _response(content="已完成")
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+
+    quiet_agent = Agent(WorkspaceContext.from_path(tmp_path), max_steps=1)
+    quiet_agent.run("回答当前问题")
+    assert capsys.readouterr().out == ""
+
+    debug_agent = Agent(
+        WorkspaceContext.from_path(tmp_path), max_steps=1, debug=True
+    )
+    debug_agent.run("回答当前问题")
+    output = capsys.readouterr().out
+    assert "[Agent] 第 1/1 轮" in output
+    assert "[Trace] task_started" in output
+    assert "[Trace Summary]" in output
+
+
 def test_trace_records_git_snapshot_changes_without_continue_noise(
     monkeypatch, tmp_path
 ):
