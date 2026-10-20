@@ -79,6 +79,16 @@ def test_completed_mutation_reports_only_non_idempotent_success(tmp_path: Path):
     )
 
 
+def test_detects_file_created_by_current_task(tmp_path: Path):
+    """验证本任务新建文件可与工作区原有文件区分。"""
+    session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
+    session.prepare_tool("create_file", {"path": "module.py"})
+    (tmp_path / "module.py").write_text("first\n", encoding="utf-8")
+
+    assert session.task_created_file_exists("module.py") is True
+    assert session.task_created_file_exists("missing.py") is False
+
+
 def test_observe_failure_uses_current_recoverable_paths(tmp_path: Path):
     target = tmp_path / "module.py"
     target.write_text("before", encoding="utf-8")
