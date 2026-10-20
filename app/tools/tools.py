@@ -435,7 +435,10 @@ def create_file(path: str, content: str) -> str:
         with file_path.open("x", encoding="utf-8", newline="") as file:
             file.write(content)
 
-        return f"创建文件成功：{path}"
+        if file_path.read_text(encoding="utf-8") != content:
+            return "错误：创建后核验失败。"
+
+        return f"创建文件成功并已核验：{path}"
 
     except FileExistsError:
         return f"错误：文件或路径已经存在：{path}"
