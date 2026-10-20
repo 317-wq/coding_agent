@@ -100,7 +100,7 @@ def test_observe_failure_uses_current_recoverable_paths(tmp_path: Path):
         "edit_file", ToolResult.failure("修改失败"), plan_failed=True
     )
 
-    assert decision.action is RecoveryAction.SUGGEST_ROLLBACK
+    assert decision.action is RecoveryAction.REPLAN
     assert decision.recoverable_paths == ("module.py",)
 
 
@@ -248,10 +248,19 @@ def test_passing_parent_test_clears_failed_child_state(tmp_path: Path):
 def test_reset_after_recovery_starts_new_change_session(tmp_path: Path):
     session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
     session.prepare_tool("create_file", {"path": "new.py"})
+    session.test_repair_attempts = 2
+    session.test_runs = 3
+    session.last_failed_test_key = '{"test_path": "."}'
+    session.last_failed_test_generation = 1
+    session.last_failed_test_error = "测试失败"
 
     session.reset_after_recovery(RollbackStatus.RESTORED)
 
     assert session.recovery_attempts == 1
+    assert session.test_repair_attempts == 0
+    assert session.test_runs == 0
+    assert session.last_failed_test_key is None
+    assert session.last_failed_test_error is None
     assert session.change_set.summary().touched_count == 0
 
 
