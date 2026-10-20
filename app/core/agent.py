@@ -1,6 +1,8 @@
 """Agent 主循环：协调规划、工具调用、安全监控与任务完成判定。"""
 
 import json
+from collections.abc import Callable
+from typing import Any
 
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -71,6 +73,8 @@ class Agent:
         max_steps: int = 20,
         max_tool_calls: int = 40,
         registry: ToolRegistry = DEFAULT_TOOL_REGISTRY,
+        debug: bool = False,
+        event_listener: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.workspace = workspace
         self.registry = registry
@@ -78,6 +82,8 @@ class Agent:
         self.model = ModelAdapter()
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
+        self.debug = debug
+        self.event_listener = event_listener
         self.last_trace: ExecutionTrace | None = None
         self.last_plan: TaskPlan | None = None
         self.last_context: ContextManager | None = None
@@ -86,11 +92,16 @@ class Agent:
         self.last_result: TaskResult | None = None
         self.last_safety: TaskSafetySession | None = None
 
-    @staticmethod
-    def _print_trace_summary(trace: ExecutionTrace) -> None:
+    def _debug_print(self, message: str) -> None:
+        """仅在调试模式输出底层 Agent 和工具日志。"""
+        if self.debug:
+            print(message)
+
+    def _print_trace_summary(self, trace: ExecutionTrace) -> None:
         """统一输出任务的 Trace 统计摘要。"""
-        print("\n[Trace Summary]")
-        print(trace.summary())
+        if self.debug:
+            print("\n[Trace Summary]")
+            print(trace.summary())
 
     def run(self, task: str) -> str:
         """执行任务并生成结构化结果，同时兼容返回原始文本结果。"""
@@ -159,7 +170,10 @@ class Agent:
     def _run_legacy(self, task: str) -> str:
         """执行原有 Agent 工具循环并返回兼容的文本结果。"""
 
-        trace = ExecutionTrace()
+        trace = ExecutionTrace(
+            verbose=self.debug,
+            event_listener=self.event_listener,
+        )
         self.last_trace = trace
         trace.record(
             "task_started",
@@ -226,7 +240,7 @@ class Agent:
         rollback_denied = False
 
         for step in range(1, self.max_steps + 1):
-            print(f"\n[Agent] 第 {step}/{self.max_steps} 轮")
+            self._debug_print(f"\n[Agent] 第 {step}/{self.max_steps} 轮")
             request_id = f"model-{step}"
             trace.record("model_request_started", step=step, request_id=request_id)
 
@@ -579,7 +593,7 @@ class Agent:
                     answer=answer,
                     request_id=request_id,
                 )
-                print("\n[Agent] 任务结束")
+                self._debug_print("\n[Agent] 任务结束")
                 return answer
 
             # 保存模型的工具调用消息，供下一轮对话使用。
@@ -634,7 +648,9 @@ class Agent:
                         status=tool_result.status.value,
                         error=str(exc),
                     )
-                    print(f"[Tool Error] {tool_name}: {tool_result.to_json()}")
+                    self._debug_print(
+                        f"[Tool Error] {tool_name}: {tool_result.to_json()}"
+                    )
 
                     messages.append(
                         {
@@ -654,7 +670,7 @@ class Agent:
                     tool_call_id=tool_call.id,
                     request_id=request_id,
                 )
-                print(
+                self._debug_print(
                     f"[Tool] {tool_name}({json.dumps(arguments, ensure_ascii=False)})"
                 )
 
@@ -683,7 +699,7 @@ class Agent:
                         cached=True,
                     )
                     result_json = cached_result.to_json()
-                    print(f"[Tool Result] {result_json[:500]}")
+                    self._debug_print(f"[Tool Result] {result_json[:500]}")
                     messages.append(
                         {
                             "role": "tool",
@@ -702,9 +718,8 @@ class Agent:
                     )
                     continue
 
-                if (
-                    tool_name == "create_file"
-                    and safety.task_created_file_exists(arguments.get("path"))
+                if tool_name == "create_file" and safety.task_created_file_exists(
+                    arguments.get("path")
                 ):
                     path = str(arguments.get("path"))
                     redirect_result = ToolResult.success(
@@ -730,7 +745,7 @@ class Agent:
                         redirected=True,
                     )
                     result_json = redirect_result.to_json()
-                    print(f"[Tool Result] {result_json[:500]}")
+                    self._debug_print(f"[Tool Result] {result_json[:500]}")
                     messages.append(
                         {
                             "role": "tool",
@@ -790,7 +805,7 @@ class Agent:
                         rejected=True,
                     )
                     result_json = tool_result.to_json()
-                    print(f"[Tool Result] {result_json[:500]}")
+                    self._debug_print(f"[Tool Result] {result_json[:500]}")
                     messages.append(
                         {
                             "role": "tool",
@@ -969,11 +984,8 @@ class Agent:
                         )
                 if state_manager is not None:
                     current = state_manager.state().current_step_id
-                    if (
-                        current is not None
-                        and state_manager.should_advance_for_tool(
-                            current, tool_name, arguments
-                        )
+                    if current is not None and state_manager.should_advance_for_tool(
+                        current, tool_name, arguments
                     ):
                         state_manager.complete_step(current, tool_result.result)
                         self.last_plan = state_manager.state().plan
@@ -1077,7 +1089,7 @@ class Agent:
                     is_error=tool_result.status is ToolStatus.FAILURE,
                 )
                 result_json = tool_result.to_json()
-                print(f"[Tool Result] {result_json[:500]}")
+                self._debug_print(f"[Tool Result] {result_json[:500]}")
 
                 messages.append(
                     {
