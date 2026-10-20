@@ -141,6 +141,15 @@ def test_test_authoring_stays_running_until_tests_execute():
     assert manager.should_advance_for_tool(authoring, "run_tests", {"test_path": "."})
 
 
+def test_development_plan_defers_tests_while_sources_are_missing():
+    """验证实现或测试编写未完成时，空工作区不应直接运行测试。"""
+    manager = PlanStateManager(
+        create_task_plan("阅读项目，然后实现功能，然后编写测试，然后运行测试")
+    )
+
+    assert manager.should_defer_tests_without_sources() is True
+
+
 def test_step_can_start_and_complete_without_mutating_old_plan(manager):
     original = manager.state().plan
     manager.start_step(1)
