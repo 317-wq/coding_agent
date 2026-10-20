@@ -395,6 +395,13 @@ class TaskSafetySession:
             raise ValueError("只有确认回滚成功后才能重置任务变更会话。")
         self.recovery_attempts += 1
         self.consecutive_tool_failures = 0
+        self.test_repair_attempts = 0
+        self.test_runs = 0
+        self.mutation_generation = 0
+        self.last_test_generation = None
+        self.last_failed_test_key = None
+        self.last_failed_test_generation = None
+        self.last_failed_test_error = None
         self.change_set = TaskChangeSet(self.workspace)
         self._mutation_paths_since_test.clear()
         self._completed_mutations.clear()
