@@ -1,0 +1,50 @@
+%% Mini Coding Agent 单次任务的主要工作流。
+%% 仅包含当前代码已实现的路径；长期记忆和评测等远期模块不在图中。
+flowchart TD
+    Start([用户启动 CLI]) --> Input[指定工作区并输入任务]
+    Input --> Init[解析工作区<br/>创建 Agent 与 Trace]
+    Init --> Explore[探索项目快照<br/>读取 Git 基线]
+    Explore --> Classify{判断任务复杂度}
+    Classify -->|需要规划| Plan[生成结构化计划与步骤状态]
+    Classify -->|简单任务| Context[初始化任务上下文]
+    Plan --> Context
+    Context --> Safety[建立任务安全会话<br/>记录约束与变更基线]
+    Safety --> Request[组装消息与可用工具]
+    Request --> Model[Model Adapter 请求模型]
+    Model --> Response{模型返回什么？}
+
+    Response -->|工具调用| Parse[解析调用参数]
+    Parse --> Guard[任务级约束与工具可用性检查]
+    Guard --> Registry[工具注册表校验参数<br/>检查风险与授权]
+    Registry --> Allowed{允许执行？}
+    Allowed -->|拒绝 / 取消 / 失败| ToolFailure[记录结构化失败结果与 Trace]
+    Allowed -->|允许| Snapshot[写操作按需保存原始状态快照]
+    Snapshot --> Execute[执行文件 / 搜索 / 测试 / Git 工具]
+    Execute --> Observe[记录工具结果<br/>更新上下文、步骤与变更集]
+    ToolFailure --> Observe
+    Observe --> StopBatch{本次调用失败或取消？}
+    StopBatch -->|是| Request
+    StopBatch -->|否，仍有同批调用| Parse
+    StopBatch -->|否，批次结束| Request
+
+    Response -->|直接总结| Check[核验计划完成条件<br/>核验明确需求]
+    Check --> Complete{所有必要条件满足？}
+    Complete -->|否| TestPending{是否有失败测试修改尚未重跑？}
+    TestPending -->|是| ForceTest[只开放对应测试目标<br/>必须先重跑验证]
+    ForceTest --> Request
+    TestPending -->|否| Recover[按失败证据生成恢复决策]
+    Recover --> RecoverAction{恢复决策}
+    RecoverAction -->|继续 / 重规划| Replan[保留有效修改<br/>刷新或重建计划与上下文]
+    Replan --> Request
+    RecoverAction -->|建议回滚| AuthorizeRollback{用户授权回滚？}
+    AuthorizeRollback -->|拒绝| Blocked[保留当前修改并停止等待确认]
+    AuthorizeRollback -->|同意| Rollback[仅恢复本任务触碰路径]
+    Rollback --> VerifyRollback{恢复后净变化为零？}
+    VerifyRollback -->|否| Blocked
+    VerifyRollback -->|是| Replan
+    RecoverAction -->|停止 / 不可恢复| Blocked
+
+    Complete -->|是| Final[重新核验文件变化、Git 状态、测试证据与 Trace]
+    Final --> Aggregate[聚合 TaskResult<br/>生成中文文本或 JSON 报告]
+    Aggregate --> End([CLI 展示结果])
+    Blocked --> Final
