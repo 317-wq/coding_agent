@@ -1,0 +1,67 @@
+%% Mini Coding Agent 当前实现的主要文件 / 模块协作关系。
+%% 连线代表主要调用或数据依赖，不表示所有连线都是直接 import。
+flowchart LR
+    subgraph CLI[交互入口 app/cli]
+        Main[main.py<br/>参数、输入、进度与会话]
+        Report[report.py<br/>文本 / JSON 报告]
+        Main --> Report
+    end
+
+    subgraph Core[任务控制 app/core]
+        Agent[agent.py<br/>Agent Loop / 总协调]
+        Planner[complexity.py + planner.py<br/>复杂度判断与计划]
+        Context[context.py + task_state.py<br/>任务上下文与步骤状态]
+        Safety[task_safety.py<br/>任务约束、变更与测试门控]
+        Completion[completion.py + requirements.py<br/>完成条件与明确需求核验]
+        Recovery[recovery.py + recovery_summary.py<br/>失败恢复决策]
+        Result[final_verification.py<br/>result_aggregator.py<br/>task_result.py<br/>最终证据与结构化结果]
+        Agent --> Planner
+        Agent --> Context
+        Agent --> Safety
+        Agent --> Completion
+        Agent --> Recovery
+        Agent --> Result
+        Safety --> Recovery
+        Completion --> Result
+        Recovery --> Result
+    end
+
+    subgraph Runtime[运行时 app/runtime]
+        Workspace[workspace.py<br/>工作区路径边界]
+        Explorer[explorer.py<br/>项目快照]
+        Model[model.py<br/>模型适配与候选切换]
+        Trace[trace.py<br/>结构化执行事件]
+    end
+
+    subgraph Tools[工具系统 app/tools]
+        Registry[registry.py<br/>注册、校验、授权、执行]
+        FileTools[tools.py<br/>文件 / 搜索 / 测试]
+        GitTools[git_tools.py<br/>只读 Git 查询]
+        Auth[authorization.py<br/>高风险操作确认]
+        Changes[change_snapshot.py + change_set.py<br/>任务快照与净变更]
+        Rollback[rollback.py<br/>授权后恢复任务触碰文件]
+        ToolResult[result.py<br/>结构化工具结果]
+        Registry --> FileTools
+        Registry --> GitTools
+        Registry --> Auth
+        Registry --> ToolResult
+        FileTools --> Workspace
+        GitTools --> Workspace
+        Changes --> Workspace
+        Rollback --> Changes
+    end
+
+    Main --> Agent
+    Agent --> Explorer
+    Agent --> Model
+    Agent --> Registry
+    Agent --> Workspace
+    Agent --> Trace
+    Agent --> Changes
+    Agent --> Rollback
+    Registry --> Trace
+    Model --> Trace
+    Workspace --> Explorer
+    Result --> Trace
+    Result --> Changes
+    Main --> Trace
