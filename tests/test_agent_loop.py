@@ -24,23 +24,24 @@ def _response(content=None, tool_calls=None):
     )
 
 
-def _call(call_id):
+def _call(call_id, name="step"):
     return SimpleNamespace(
         id=call_id,
-        function=SimpleNamespace(name="step", arguments="{}"),
+        function=SimpleNamespace(name=name, arguments="{}"),
     )
 
 
 def test_complex_task_uses_plan_and_verifies_before_finishing(monkeypatch, tmp_path):
     registry = ToolRegistry()
-    registry.register(
-        ToolSpec(
-            name="step",
-            description="执行步骤",
-            parameters=PARAMETERS,
-            executor=lambda: "步骤完成",
+    for tool_name in ("read_file", "create_file", "run_tests"):
+        registry.register(
+            ToolSpec(
+                name=tool_name,
+                description=f"执行 {tool_name}",
+                parameters=PARAMETERS,
+                executor=lambda: "步骤完成",
+            )
         )
-    )
 
     class FakeModel:
         def __init__(self):
@@ -49,7 +50,12 @@ def test_complex_task_uses_plan_and_verifies_before_finishing(monkeypatch, tmp_p
         def chat(self, messages, tools):
             self.calls += 1
             if self.calls <= 3:
-                return _response(tool_calls=[_call(f"call-{self.calls}")])
+                tool_name = ("read_file", "create_file", "run_tests")[
+                    self.calls - 1
+                ]
+                return _response(
+                    tool_calls=[_call(f"call-{self.calls}", tool_name)]
+                )
             return _response(content="任务已完成")
 
     monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
@@ -59,7 +65,9 @@ def test_complex_task_uses_plan_and_verifies_before_finishing(monkeypatch, tmp_p
     assert agent.last_plan is not None
     assert all(step.status.value == "completed" for step in agent.last_plan.steps)
     assert agent.last_context is not None
-    assert len(agent.last_context.context.tool_results) == 3
+    # 测试工具结果进入 test_results，普通工具结果进入 tool_results。
+    assert len(agent.last_context.context.tool_results) == 2
+    assert len(agent.last_context.context.test_results) == 1
 
 
 class FakeModelUnavailableError(RuntimeError):
