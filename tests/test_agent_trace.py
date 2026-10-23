@@ -23,19 +23,20 @@ def _response(content=None, tool_calls=None):
 
 def test_trace_records_planning_state_and_completion_events(monkeypatch, tmp_path):
     registry = ToolRegistry()
-    registry.register(
-        ToolSpec(
-            name="step",
-            description="执行步骤",
-            parameters=PARAMETERS,
-            executor=lambda: "步骤完成",
+    for tool_name in ("read_file", "create_file", "run_tests"):
+        registry.register(
+            ToolSpec(
+                name=tool_name,
+                description=f"执行 {tool_name}",
+                parameters=PARAMETERS,
+                executor=lambda: "步骤完成",
+            )
         )
-    )
 
-    def call(call_id):
+    def call(call_id, name):
         return SimpleNamespace(
             id=call_id,
-            function=SimpleNamespace(name="step", arguments="{}"),
+            function=SimpleNamespace(name=name, arguments="{}"),
         )
 
     class FakeModel:
@@ -44,7 +45,8 @@ def test_trace_records_planning_state_and_completion_events(monkeypatch, tmp_pat
         def chat(self, messages, tools):
             self.calls += 1
             if self.calls <= 3:
-                return _response(tool_calls=[call(f"call-{self.calls}")])
+                name = ("read_file", "create_file", "run_tests")[self.calls - 1]
+                return _response(tool_calls=[call(f"call-{self.calls}", name)])
             return _response(content="已完成")
 
     monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
@@ -55,7 +57,8 @@ def test_trace_records_planning_state_and_completion_events(monkeypatch, tmp_pat
     names = [event["event"] for event in events]
     assert "complexity_decided" in names
     assert "plan_created" in names
-    assert names.count("plan_step_status_changed") == 3
+    # 实现步骤先进入 running、再被测试阶段推进为 completed，共 4 次状态变化。
+    assert names.count("plan_step_status_changed") == 4
     assert "completion_checked" in names
     completion = next(
         event for event in events if event["event"] == "completion_checked"
