@@ -1,14 +1,23 @@
-"""基于结构化证据的任务结果验证与完成判定。"""
+"""基于结构化证据的任务结果验证与完成判定。
+
+判定只接受两类事实：工具执行状态和结构化测试证据。测试结论完全来自
+``run_tests`` 输出的结构化字段（测试目标、测试退出码、测试结果），不对原始
+输出做失败或成功关键词扫描，避免用例名、日志或断言信息中的“error”影响结论。
+"""
 
 import json
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from app.core.planner import PlanStepStatus, TaskPlan
-from app.core.test_evidence import test_target_covers
+from app.core.task_result import TestEvidence, TestEvidenceStatus
+from app.core.test_evidence import (
+    has_structured_test_output,
+    latest_test_evidence,
+    summarize_test_evidence,
+)
 from app.tools.result import ToolResult, ToolStatus
 
 
@@ -51,41 +60,26 @@ class CompletionDecision:
 class CompletionVerifier:
     """不依赖模型自由文本的确定性完成判定器。"""
 
-    _FAILURE_PATTERN = re.compile(
-        r"失败|错误|failed|failure|error|exception", re.IGNORECASE
-    )
-    _SUCCESS_PATTERN = re.compile(
-        r"通过|成功|passed|pass|success|ok", re.IGNORECASE
-    )
-    _TEST_TARGET_PATTERN = re.compile(r"^测试目标：([^\n]+)", re.MULTILINE)
-
     @classmethod
-    def _latest_test_results(cls, test_results: Sequence[str]) -> tuple[str, ...]:
-        """保留最新结果，并允许成功的父目标覆盖历史子目标失败。"""
-        latest: dict[str, str] = {}
-        unkeyed: list[str] = []
-        for raw in test_results:
-            normalized = raw.strip()
-            if not normalized:
-                continue
-            match = cls._TEST_TARGET_PATTERN.search(normalized)
-            if match is None:
-                unkeyed.append(normalized)
-                continue
-            target = match.group(1).strip()
-            if cls._is_successful_test_result(normalized):
-                latest = {
-                    old_target: old_result
-                    for old_target, old_result in latest.items()
-                    if not test_target_covers(target, old_target)
-                }
-            latest[target] = normalized
-        return (*unkeyed, *latest.values())
+    def _structured_test_evidence(
+        cls, test_results: Sequence[str]
+    ) -> tuple[TestEvidence, ...]:
+        """只保留结构化测试结果，并按目标折叠为最新证据。"""
+        structured = tuple(
+            result
+            for result in test_results
+            if isinstance(result, str) and has_structured_test_output(result)
+        )
+        if not structured:
+            return ()
+        return latest_test_evidence(summarize_test_evidence(structured))
 
-    @classmethod
-    def _is_successful_test_result(cls, raw: str) -> bool:
-        """判断测试文本是否明确表示成功，而非依赖模糊关键词。"""
-        return "测试退出码：0" in raw and "测试结果：通过" in raw
+    @staticmethod
+    def _evidence_text(evidence: TestEvidence) -> str:
+        """把结构化测试证据还原为可审查的描述。"""
+        if evidence.output:
+            return evidence.output
+        return f"{evidence.target}：{evidence.status.value}"
 
     def verify(
         self,
@@ -93,7 +87,7 @@ class CompletionVerifier:
         tool_results: Sequence[ToolResult] = (),
         test_results: Sequence[str] = (),
     ) -> CompletionDecision:
-        """根据计划状态、工具结果和测试结果严格判定复杂任务。"""
+        """根据计划状态、工具结果和结构化测试证据严格判定复杂任务。"""
         if not isinstance(plan, TaskPlan):
             raise TypeError("计划必须是 TaskPlan。")
         if any(not isinstance(item, ToolResult) for item in tool_results):
@@ -131,9 +125,11 @@ class CompletionVerifier:
                 evidence=failed_tools,
             )
 
-        normalized_tests = self._latest_test_results(test_results)
+        tests = self._structured_test_evidence(test_results)
         failed_tests = tuple(
-            result for result in normalized_tests if self._FAILURE_PATTERN.search(result)
+            self._evidence_text(item)
+            for item in tests
+            if item.status is TestEvidenceStatus.FAILED
         )
         if failed_tests:
             return CompletionDecision(
@@ -150,7 +146,9 @@ class CompletionVerifier:
             if result.status is ToolStatus.SUCCESS
         )
         successful_tests = tuple(
-            result for result in normalized_tests if self._SUCCESS_PATTERN.search(result)
+            self._evidence_text(item)
+            for item in tests
+            if item.status is TestEvidenceStatus.PASSED
         )
         evidence = successful_tools + successful_tests
         if not evidence:
@@ -193,9 +191,11 @@ class CompletionVerifier:
                 "存在失败或取消的工具结果。",
                 evidence=failures,
             )
-        normalized_tests = self._latest_test_results(test_results)
+        tests = self._structured_test_evidence(test_results)
         failed_tests = tuple(
-            item for item in normalized_tests if self._FAILURE_PATTERN.search(item)
+            self._evidence_text(item)
+            for item in tests
+            if item.status is TestEvidenceStatus.FAILED
         )
         if failed_tests:
             return CompletionDecision(
@@ -208,7 +208,9 @@ class CompletionVerifier:
             for item in tool_results
             if item.status is ToolStatus.SUCCESS
         ) + tuple(
-            item for item in normalized_tests if self._SUCCESS_PATTERN.search(item)
+            self._evidence_text(item)
+            for item in tests
+            if item.status is TestEvidenceStatus.PASSED
         )
         if not evidence:
             return CompletionDecision(
