@@ -70,6 +70,7 @@
 - `PROJECT.md` 第 4 节需同步的条目：`Planner`（步骤状态由工具能力、目标路径和完成条件维护）、`完成判定`（测试状态取值口径）、`失败恢复`（重规划上限）、`Agent 任务结果`（异常降级为 blocked）。
 - 已同步至 PROJECT.md v1.36：工具能力类别成为步骤匹配与完成核验的唯一依据，只读 Git 查询和未登记工具不参与任何步骤状态流转（对应 D1）。
 - 已同步至 PROJECT.md v1.37：完成判定测试口径改为结构化字段唯一来源，自由文本不参与判定（对应 D2）。
+- 已同步至 PROJECT.md v1.38：变更集异常不再穿透 CLI，统一记录失败事件并把任务结果降级为 `blocked`（对应 D3）。
 
 ### 技术选型改动
 
@@ -110,7 +111,7 @@
     4. 明确冲突优先级：退出码非 0 **或** `测试结果：失败` → `FAILED`；两者都没有 → 沿用现有“未标识测试”行为。
   - 完成条件：含 `error` 字样的通过结果判 `complete`；真实失败判 `blocked`；原有 `test_completion.py`、`test_test_evidence.py`、`test_test_failure_status.py` 全部通过。
 
-- [ ] **D3 · 变更集异常的主循环降级**
+- [x] **D3 · 变更集异常的主循环降级**
 
   - 现象：`change_set.summary()` 抛出 `ChangeSetError` 时异常直接穿透 `Agent.run()`，CLI 只打印“程序发生异常”，`agent.last_result` 为空，用户拿不到任何结构化结论。
   - 根因：`app/core/agent.py:890`、`:1065`、`:535`、`:1167` 在 `try` 之外裸调 `summary()`；触发条件包括触碰文件变成符号链接、超过 1MB、读取期间被改动。
@@ -169,7 +170,7 @@
   print('ok')"
   ```
 
-- [ ] **D3**：新增集成测试构造 `ChangeSetError` 场景，断言不抛异常、`last_result.status == blocked`、`stop_reason` 非空、Trace 含 `change_set_failed`。
+- [x] **D3**：新增集成测试构造 `ChangeSetError` 场景，断言不抛异常、`last_result.status == blocked`、`stop_reason` 非空、Trace 含 `change_set_failed`。
 - [ ] **D4**：新增单元测试断言连续重规划达上限后动作为 `STOP`；集成测试断言 Agent 不会超出重规划上限继续重建计划。
 - [ ] **D5**：`grep -rn 'rollback_denied\|test_runs' app/` 无输出。
 - [ ] **文档同步**：每项验收后 `PROJECT.md` 升版并在第 6 节变更记录追加一行；本文件第 3 节追加“已同步至 PROJECT.md vX.Y”。
