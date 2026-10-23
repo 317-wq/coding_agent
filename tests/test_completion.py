@@ -137,3 +137,57 @@ def test_passing_parent_target_supersedes_failed_child_target():
     )
 
     assert decision.status is CompletionStatus.COMPLETE
+
+def test_passing_output_containing_error_keyword_is_not_failure():
+    """验证通过结果中的 error 字样不会把任务误判为阻塞。"""
+
+    plan = _completed_plan()
+    decision = verify_completion(
+        plan,
+        [ToolResult.success("已执行")],
+        [
+            (
+                "测试目标：tests/test_error_handling.py\n"
+                "测试退出码：0\n"
+                "测试结果：通过\n"
+                "1 passed in 0.01s\n"
+                "注意：error handling 场景已覆盖\n"
+            )
+        ],
+    )
+
+    assert decision.status is CompletionStatus.COMPLETE
+    assert decision.completed is True
+
+
+def test_contradictory_success_exit_code_and_failure_field_blocks_completion():
+    """验证退出码为 0 但结果字段为失败时仍判定阻塞。"""
+
+    plan = _completed_plan()
+    decision = verify_completion(
+        plan,
+        [ToolResult.success("已执行")],
+        ["测试目标：tests/test_contract.py\n测试退出码：0\n测试结果：失败"],
+    )
+
+    assert decision.status is CompletionStatus.BLOCKED
+    assert decision.completed is False
+
+
+def test_failed_test_evidence_is_preserved_in_decision():
+    """验证结构化失败证据原样保留，便于用户审查真实原因。"""
+
+    plan = _completed_plan()
+    raw = (
+        "测试目标：tests/test_calc.py\n"
+        "测试退出码：1\n"
+        "测试结果：失败\n"
+        "测试错误类型：断言失败\n"
+        "assert 1 == 2"
+    )
+
+    decision = verify_completion(plan, [ToolResult.success("已执行")], [raw])
+
+    assert decision.status is CompletionStatus.BLOCKED
+    assert decision.evidence == (raw,)
+
