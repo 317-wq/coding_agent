@@ -68,7 +68,10 @@ def test_context_limit_preserves_task_and_recent_failure():
     ("tool_result", "test_result"),
     [
         (ToolResult.failure("工具失败"), "测试通过"),
-        (ToolResult.success("已执行"), "测试失败"),
+        (
+            ToolResult.success("已执行"),
+            "测试目标：tests/test_module.py\n测试退出码：1\n测试结果：失败",
+        ),
     ],
 )
 def test_completion_rejects_failed_evidence(tool_result, test_result):
