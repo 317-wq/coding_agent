@@ -11,6 +11,25 @@ _TARGET = re.compile(r"测试目标：([^\n]+)")
 _EXIT_CODE = re.compile(r"测试退出码：(-?\d+)")
 _ERROR_KIND = re.compile(r"测试错误类型：([^\n]+)")
 
+STRUCTURED_TEST_FIELDS: tuple[str, ...] = (
+    "测试目标：",
+    "测试退出码：",
+    "测试结果：",
+)
+"""run_tests 稳定输出的字段标记；只有带这些字段的文本才是结构化测试证据。"""
+
+
+def has_structured_test_output(raw: str) -> bool:
+    """判断一段测试输出是否包含结构化测试字段。
+
+    完成判定只接受带字段的测试证据。缺少字段的自由文本（例如模型总结、
+    工具摘要）既不能证明通过，也不能证明失败，因此不参与完成判定。
+    """
+
+    if not isinstance(raw, str):
+        return False
+    return any(field in raw for field in STRUCTURED_TEST_FIELDS)
+
 
 class TestEvidenceSummarizer:
     """从 run_tests 的结构化文本中提取稳定的测试证据。"""
