@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from app.core.planner import PlanStepStatus, TaskPlan
+from app.tools.capability import ToolCapability, capability_of
 
 
 @dataclass(frozen=True)
@@ -65,10 +66,16 @@ class PlanStateManager:
         return self._replace_step(step_id, PlanStepStatus.RUNNING)
 
     def match_step(self, tool_name: str, arguments: dict[str, Any]) -> int | None:
-        """根据工具能力和目标路径选择匹配的 pending 步骤。"""
+        """按工具能力类别和目标路径选择匹配的 pending 步骤。"""
 
         # 建目录只是后续写文件的前置条件，不能单独证明功能或测试已经完成。
         if tool_name == "create_directory":
+            return None
+
+        capability = capability_of(tool_name)
+
+        # 只读版本控制查询和未登记工具不参与任何步骤状态流转。
+        if capability in {ToolCapability.VCS, ToolCapability.UNKNOWN}:
             return None
 
         path = str(arguments.get("path", "")).lower()
@@ -78,11 +85,11 @@ class PlanStateManager:
                 continue
             text = step.objective.lower()
             score = 0
-            if tool_name in {"list_files", "read_file", "search_code"} and any(
+            if capability is ToolCapability.READ and any(
                 word in text for word in ("阅读", "读取", "项目结构", "搜索")
             ):
                 score += 4
-            if tool_name in {"create_file", "edit_file", "delete_file", "delete_directory"}:
+            if capability is ToolCapability.MUTATE:
                 in_tests = self._is_in_tests_path(path)
                 is_test_source = self._is_test_source_path(path)
                 if is_test_source:
@@ -91,10 +98,8 @@ class PlanStateManager:
                     word in text
                     for word in ("实现", "修改", "修复", "创建", "新增", "删除", "功能")
                 ) else 0
-            if tool_name == "run_tests":
+            if capability is ToolCapability.TEST:
                 score += 6 if "运行" in text or "验证" in text else 0
-            if tool_name not in {"run_tests", "list_files", "read_file", "search_code", "create_file", "edit_file", "create_directory", "delete_file", "delete_directory"}:
-                score += 1
             objective_scores.append((score, step.step_id))
         if not objective_scores:
             return None
@@ -105,22 +110,22 @@ class PlanStateManager:
     def can_complete_step(
         self, step_id: int, tool_name: str, arguments: dict[str, Any], result: Any
     ) -> bool:
-        """只有工具类型、目标路径和成功结果共同满足时才允许完成步骤。"""
+        """只有工具能力类别、目标路径和成功结果共同满足时才允许完成步骤。"""
 
         status = getattr(result, "status", None)
         if status is None or getattr(status, "value", status) != "success":
             return False
-        known_tools = {
-            "run_tests", "list_files", "read_file", "search_code",
-            "create_file", "edit_file", "create_directory", "delete_file",
-            "delete_directory",
-        }
-        if tool_name not in known_tools:
-            return True
+
+        capability = capability_of(tool_name)
+
+        # 只读版本控制查询和未登记工具不是任何步骤的完成证据。
+        if capability in {ToolCapability.VCS, ToolCapability.UNKNOWN}:
+            return False
+
         text = self._step(step_id).objective
         path = str(arguments.get("path", "")).lower()
         if "阅读" in text or "读取" in text or "项目结构" in text:
-            return tool_name in {"list_files", "read_file", "search_code"}
+            return capability is ToolCapability.READ
         if "编写" in text or "补充" in text:
             return (
                 tool_name in {"create_file", "edit_file"}
@@ -128,18 +133,14 @@ class PlanStateManager:
                 and not self._has_later_test_execution_step(step_id)
             )
         if "运行" in text or "验证" in text:
-            return tool_name == "run_tests"
+            return capability is ToolCapability.TEST
         if any(
-            word in text
-            for word in ("实现", "修改", "修复", "创建", "新增", "删除", "功能")
+            word in text for word in ("实现", "修改", "修复", "创建", "新增", "删除", "功能")
         ):
-            mutation_matches = tool_name in {
-                "create_file",
-                "edit_file",
-                "delete_file",
-                "delete_directory",
-            } and not (
-                path.startswith("tests/") or "/tests/" in path
+            mutation_matches = (
+                capability is ToolCapability.MUTATE
+                and tool_name != "create_directory"
+                and not self._is_in_tests_path(path)
             )
             if not mutation_matches:
                 return False
