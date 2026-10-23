@@ -215,3 +215,56 @@ def test_failure_and_cancel_require_non_empty_reasons(manager):
     with pytest.raises(ValueError, match="失败原因不能为空"):
         manager.fail_step(1, " ")
     manager.cancel_step(1, "用户取消")
+
+
+class _SuccessfulToolResult:
+    """提供计划状态测试所需的成功工具结果。"""
+
+    status = "success"
+
+
+@pytest.mark.parametrize("tool_name", ["git_status", "git_diff"])
+def test_vcs_tools_never_start_or_complete_plan_steps(tool_name):
+    """验证只读 Git 查询不会成为任何计划步骤的完成证据。"""
+
+    manager = PlanStateManager(
+        create_task_plan(
+            "重构支付模块并迁移配置，先阅读现有代码，然后实现新接口，"
+            "同时编写测试，最后运行全部测试验证。"
+        )
+    )
+    plan = manager.state().plan
+
+    assert manager.match_step(tool_name, {"path": "."}) is None
+
+    for step in plan.steps:
+        per_step = PlanStateManager(plan)
+        per_step.start_step(step.step_id)
+        assert not per_step.can_complete_step(
+            step.step_id,
+            tool_name,
+            {"path": "."},
+            _SuccessfulToolResult(),
+        )
+
+
+def test_unregistered_tool_never_starts_or_completes_plan_steps():
+    """验证未登记能力类别的工具不会推进任何计划步骤。"""
+
+    manager = PlanStateManager(
+        create_task_plan("实现功能，然后编写测试，然后运行测试")
+    )
+    plan = manager.state().plan
+
+    assert manager.match_step("custom_tool", {"path": "module.py"}) is None
+
+    for step in plan.steps:
+        per_step = PlanStateManager(plan)
+        per_step.start_step(step.step_id)
+        assert not per_step.can_complete_step(
+            step.step_id,
+            "custom_tool",
+            {"path": "module.py"},
+            _SuccessfulToolResult(),
+        )
+
