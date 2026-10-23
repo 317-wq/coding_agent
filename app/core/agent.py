@@ -27,7 +27,8 @@ from app.runtime.model import ModelAdapter
 from app.runtime.trace import ExecutionTrace
 from app.runtime.workspace import WorkspaceContext
 from app.tools import set_workspace
-from app.tools.change_set import ChangeSetSummary
+from app.tools.change_set import ChangeSetError, ChangeSetSummary
+from app.tools.change_snapshot import SnapshotError
 from app.tools.git_repository import inspect_git_repository
 from app.tools.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from app.tools.result import ToolResult, ToolStatus
@@ -104,11 +105,25 @@ class Agent:
             print(trace.summary())
 
     def run(self, task: str) -> str:
-        """执行任务并生成结构化结果，同时兼容返回原始文本结果。"""
+        """执行任务并生成结构化结果，同时兼容返回原始文本结果。
+
+        变更集在被外部干扰破坏后无法安全分析（触碰路径变成符号链接、文件超过
+        摘要上限、读取期间被改写）。这类异常不允许穿透 CLI，统一降级为可读的
+        停止说明，并由任务结果层落成 ``blocked``。
+        """
         self.last_result = None
         self.last_safety = None
         try:
             answer = self._run_legacy(task)
+        except (ChangeSetError, SnapshotError) as exc:
+            answer = f"变更集状态无法安全分析，任务已停止：{exc}"
+            if self.last_trace is not None:
+                self.last_trace.record("change_set_failed", error=str(exc))
+                self.last_trace.record(
+                    "task_stopped",
+                    reason="change_set_unavailable",
+                    error=answer,
+                )
         finally:
             self._build_task_result(task)
             if self.last_trace is not None:
@@ -116,13 +131,24 @@ class Agent:
         return answer
 
     def _build_task_result(self, task: str) -> None:
-        """从本次 Agent 运行证据生成并保存 TaskResult。"""
+        """从本次 Agent 运行证据生成并保存 TaskResult。
+
+        正常核验与核验失败共用同一份构造逻辑，只在证据和任务状态上不同，
+        避免同一批报告字段在两处分别拼装后出现口径差异。
+        """
         if (
             self.last_trace is None
             or self.last_context is None
             or self.last_change_set is None
         ):
             return
+
+        final_evidence = None
+        completion: CompletionDecision | None = None
+        task_status: TaskStatus | None = None
+        changes: ChangeSetSummary = ChangeSetSummary(
+            touched_count=0, unchanged_count=0, changes=()
+        )
         try:
             final_evidence = FinalStateVerifier().verify(
                 self.workspace,
@@ -132,40 +158,36 @@ class Agent:
         except Exception as exc:  # noqa: BLE001 - reporting boundary
             reason = f"最终状态核验失败：{exc}"
             self.last_trace.record("final_state_verification_failed", error=str(exc))
-            self.last_result = TaskResultAggregator().aggregate(
-                self.last_context.context,
-                ChangeSetSummary(touched_count=0, unchanged_count=0, changes=()),
-                completion=CompletionDecision(CompletionStatus.BLOCKED, reason),
-                trace=self.last_trace,
-                recovery=self.last_recovery_decision,
-                repair_attempts=(
-                    self.last_safety.test_repair_attempts
-                    if self.last_safety is not None
-                    else 0
-                ),
-                task_status=TaskStatus.BLOCKED,
-            )
-            return
-        completion_status = None
-        for event in reversed(self.last_trace.events):
-            if event["event"] == "completion_checked":
-                completion_status = event.get("details", {}).get("status")
-                break
-        task_status = None
-        if completion_status == "blocked":
+            completion = CompletionDecision(CompletionStatus.BLOCKED, reason)
             task_status = TaskStatus.BLOCKED
-        repair_attempts = (
-            self.last_safety.test_repair_attempts if self.last_safety is not None else 0
-        )
+        else:
+            changes = final_evidence.changes
+            if self._last_completion_status() == "blocked":
+                task_status = TaskStatus.BLOCKED
+
         self.last_result = TaskResultAggregator().aggregate(
             self.last_context.context,
-            final_evidence.changes,
+            changes,
+            completion=completion,
             trace=self.last_trace,
             recovery=self.last_recovery_decision,
-            repair_attempts=repair_attempts,
+            repair_attempts=(
+                self.last_safety.test_repair_attempts
+                if self.last_safety is not None
+                else 0
+            ),
             task_status=task_status,
             final_evidence=final_evidence,
         )
+
+    def _last_completion_status(self) -> str | None:
+        """读取最近一次完成判定状态，供任务结果定级使用。"""
+        if self.last_trace is None:
+            return None
+        for event in reversed(self.last_trace.events):
+            if event["event"] == "completion_checked":
+                return event.get("details", {}).get("status")
+        return None
 
     def _run_legacy(self, task: str) -> str:
         """执行原有 Agent 工具循环并返回兼容的文本结果。"""
