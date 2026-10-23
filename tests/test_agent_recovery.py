@@ -52,7 +52,10 @@ def _registry(tmp_path, authorizer):
         return ToolResult.failure("模拟修改失败")
 
     registry.register(ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, failing_edit))
-    registry.register(ToolSpec("step", "执行步骤", EMPTY_PARAMETERS, lambda: "完成"))
+    for tool_name in ("read_file", "create_file", "run_tests"):
+        registry.register(
+            ToolSpec(tool_name, f"执行 {tool_name}", EMPTY_PARAMETERS, lambda: "完成")
+        )
     return registry
 
 
@@ -75,7 +78,12 @@ def test_agent_replans_before_rollback_after_first_failed_mutation(
                     tool_calls=[_call("edit_file", "edit", '{"path":"module.py"}')]
                 )
             if self.calls <= 4:
-                return _response(tool_calls=[_call("step", f"step-{self.calls}")])
+                tool_name = ("read_file", "create_file", "run_tests")[
+                    self.calls - 2
+                ]
+                return _response(
+                    tool_calls=[_call(tool_name, f"{tool_name}-{self.calls}")]
+                )
             assert "已刷新项目状态并重新规划" in str(messages)
             return _response(content="恢复后完成")
 
