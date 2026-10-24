@@ -13,6 +13,8 @@
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from openai.types.chat import ChatCompletionMessageParam
@@ -67,6 +69,24 @@ SYSTEM_PROMPT = """
 15. 不要重复创建已经成功创建的目录或文件；互不依赖的工具调用尽量在同一响应中按顺序批量给出。
 16. 开发任务尚未创建测试源文件时先完成实现和测试编写，不要对空工作区运行 pytest。
 """
+
+
+@dataclass(frozen=True)
+class _PreparedCall:
+    """一次工具调用在预检阶段的结果。"""
+
+    decision: "_CallDecision"
+    arguments: dict[str, Any] | None = None
+    answer: str | None = None
+
+
+class _CallDecision(StrEnum):
+    """预检阶段对一次工具调用的处置结果。"""
+
+    EXECUTE = "execute"
+    SKIP = "skip"
+    ABORT = "abort"
+    FINISH = "finish"
 
 
 class TaskRunner:
@@ -499,478 +519,225 @@ class TaskRunner:
         for call_index, tool_call in enumerate(message.tool_calls):
             tool_name = tool_call.function.name
 
-            try:
-                arguments = json.loads(tool_call.function.arguments)
-
-                if not isinstance(arguments, dict):
-                    raise ValueError(  # noqa: TRY004 - normalized below
-                        "工具参数必须是 JSON 对象。"
-                    )
-
-            except (json.JSONDecodeError, ValueError) as exc:
-                tool_result = ToolResult.failure(f"工具参数解析失败：{exc}")
-                if self.context is not None:
-                    before_trim = self.context.context.truncated_count
-                    self.context.add_tool_result(tool_result)
-                    if self.context.context.truncated_count > before_trim:
-                        self.trace.record(
-                            "context_trimmed",
-                            tool_call_id=tool_call.id,
-                            truncated_count=(
-                                self.context.context.truncated_count
-                            ),
-                        )
-                self.trace.record(
-                    "tool_arguments_invalid",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    status=tool_result.status.value,
-                    error=str(exc),
-                )
-                self._debug_print(
-                    f"[Tool Error] {tool_name}: {tool_result.to_json()}"
-                )
-
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": tool_result.to_json(),
-                    }
-                )
-
-                # 让模型根据错误重新决定，而不是继续当前批次。
+            prepared = self._prepare_tool_call(
+                tool_call, tool_name, request_id
+            )
+            if prepared.decision is _CallDecision.FINISH:
+                return prepared.answer
+            if prepared.decision is _CallDecision.ABORT:
                 return None
+            if prepared.decision is _CallDecision.SKIP:
+                continue
+            arguments = prepared.arguments or {}
 
-            self.trace.record(
-                "tool_call_started",
-                tool=tool_name,
+            (
+                tool_result,
+                snapshot_paths,
+                pre_tool_changes,
+                finish_reason,
+            ) = self._execute_tool_call(
+                tool_name, arguments, tool_call, request_id
+            )
+            if finish_reason is not None:
+                return finish_reason
+
+            finish_reason, abort_batch = self._apply_tool_result(
+                tool_call=tool_call,
+                tool_name=tool_name,
                 arguments=arguments,
-                tool_call_id=tool_call.id,
+                snapshot_paths=snapshot_paths,
+                pre_tool_changes=pre_tool_changes,
+                tool_result=tool_result,
                 request_id=request_id,
+                remaining_calls=len(message.tool_calls) - call_index - 1,
             )
-            self._debug_print(
-                f"[Tool] {tool_name}({json.dumps(arguments, ensure_ascii=False)})"
-            )
-
-            cached_result = self.safety.completed_mutation(tool_name, arguments)
-            if cached_result is not None:
-                if tool_name == "create_directory":
-                    cached_result = ToolResult.success(
-                        f"无需创建，目录已存在：{arguments.get('path', '')}"
-                    )
-                self.trace.record(
-                    "duplicate_tool_call_skipped",
-                    tool=tool_name,
-                    arguments=arguments,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    reason="相同写操作已成功完成，复用先前结果。",
-                )
-                self.trace.record(
-                    "tool_call_finished",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    status=cached_result.status.value,
-                    result=cached_result.result,
-                    error=cached_result.error,
-                    cached=True,
-                )
-                result_json = cached_result.to_json()
-                self._debug_print(f"[Tool Result] {result_json[:500]}")
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": result_json,
-                    }
-                )
-                self.messages.append(
-                    {
-                        "role": "system",
-                        "content": (
-                            "该写操作已经成功完成且目标状态仍然成立，"
-                            "不要再次请求相同操作；请继续下一个未完成目标。"
-                        ),
-                    }
-                )
-                continue
-
-            if tool_name == "create_file" and self.safety.task_created_file_exists(
-                arguments.get("path")
-            ):
-                path = str(arguments.get("path"))
-                redirect_result = ToolResult.success(
-                    f"未重复创建：{path} 已由本任务创建；"
-                    "如需改变内容，请基于已知内容调用 edit_file。"
-                )
-                self.trace.record(
-                    "conflicting_create_redirected",
-                    tool=tool_name,
-                    path=path,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    reason="本任务创建的文件已存在，要求改用 edit_file。",
-                )
-                self.trace.record(
-                    "tool_call_finished",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    status=redirect_result.status.value,
-                    result=redirect_result.result,
-                    error=None,
-                    redirected=True,
-                )
-                result_json = redirect_result.to_json()
-                self._debug_print(f"[Tool Result] {result_json[:500]}")
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": result_json,
-                    }
-                )
-                self.messages.append(
-                    {
-                        "role": "system",
-                        "content": (
-                            f"`{path}` 已由本任务创建。不要再次 create_file；"
-                            "如需调整内容，请使用 edit_file，"
-                            "否则继续创建下一个尚未完成的文件。"
-                        ),
-                    }
-                )
-                continue
-
-            if self.tool_call_count >= self.max_tool_calls:
-                reason = (
-                    f"已达到工具调用上限 {self.max_tool_calls}，"
-                    "停止执行。请缩小任务范围后重试。"
-                )
-                self.trace.record(
-                    "task_stopped",
-                    reason="max_tool_calls",
-                    limit=self.max_tool_calls,
-                    request_id=request_id,
-                )
-                return reason
-
-            rerun_block_reason = self.safety.test_rerun_block_reason(
-                tool_name, arguments
-            )
-            if rerun_block_reason is not None:
-                self.tool_call_count += 1
-                tool_result = ToolResult.cancelled(rerun_block_reason)
-                if self.context is not None:
-                    self.context.add_tool_result(tool_result)
-                self.trace.record(
-                    "safety_rejected",
-                    rejection_type="test_rerun_without_mutation",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    reason=rerun_block_reason,
-                )
-                self.trace.record(
-                    "tool_call_finished",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    status=tool_result.status.value,
-                    result=tool_result.result,
-                    error=tool_result.error,
-                    rejected=True,
-                )
-                result_json = tool_result.to_json()
-                self._debug_print(f"[Tool Result] {result_json[:500]}")
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": result_json,
-                    }
-                )
-                self.messages.append(
-                    {
-                        "role": "system",
-                        "content": rerun_block_reason,
-                    }
-                )
+            if finish_reason is not None:
+                return finish_reason
+            if abort_batch:
                 return None
 
-            snapshot_paths: tuple[str, ...] = ()
-            pre_tool_changes: dict[str, dict] = {}
-            try:
-                self.safety.validate_tool(tool_name, arguments)
-                snapshot_paths = self.safety.prepare_tool(tool_name, arguments)
-                pre_tool_changes = {
-                    change.path: change.to_dict()
-                    for change in self.safety.change_set.summary().changes
-                }
-                tool_result = self.registry.execute(
-                    tool_name,
-                    arguments,
-                    event_recorder=self.trace.record,
-                )
-            except KeyboardInterrupt:
-                self.trace.record(
-                    "task_stopped",
-                    reason="user_interrupted",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                )
-                raise
-            except TaskConstraintViolation as exc:
-                tool_result = ToolResult.cancelled(str(exc))
-                self.tool_call_count += 1
-                self.trace.record(
-                    "safety_rejected",
-                    rejection_type="user_constraint",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    reason=str(exc),
-                )
-                self.trace.record(
-                    "tool_call_finished",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    status=tool_result.status.value,
-                    result=tool_result.result,
-                    error=tool_result.error,
-                    rejected=True,
-                )
-                self.trace.record(
-                    "task_stopped",
-                    reason="user_constraint_violation",
-                    error=str(exc),
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                )
-                return str(exc)
-            except Exception as exc:  # noqa: BLE001 - tool boundary
-                tool_result = ToolResult.failure(f"工具执行异常：{exc}")
 
-            self.tool_call_count += 1
-            reported_mutation = self.safety.record_completed_mutation(
-                tool_name, arguments, tool_result
-            )
-            post_tool_changes = self.safety.change_set.summary()
-            post_tool_changes_by_path = {
-                change.path: change.to_dict()
-                for change in post_tool_changes.changes
-            }
-            changed_snapshot_paths = tuple(
-                path
-                for path in snapshot_paths
-                if pre_tool_changes.get(path) != post_tool_changes_by_path.get(path)
-            )
-            if changed_snapshot_paths:
-                self.trace.record(
-                    "snapshot_created",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    paths=changed_snapshot_paths,
-                    purpose="rollback_baseline",
-                )
-            mutation_applied = bool(changed_snapshot_paths) or (
-                reported_mutation and not snapshot_paths
-            )
-            if mutation_applied:
-                mutation_path = arguments.get("path")
-                self.safety.record_mutation_applied(
-                    mutation_path if isinstance(mutation_path, str) else None
-                )
-                self.trace.record(
-                    "mutation_applied",
-                    tool=tool_name,
-                    path=arguments.get("path"),
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    tool_status=tool_result.status.value,
-                    net_change=any(
-                        path in post_tool_changes_by_path
-                        for path in changed_snapshot_paths
-                    ),
+        return None
+
+    def _prepare_tool_call(
+        self, tool_call: Any, tool_name: str, request_id: str
+    ) -> _PreparedCall:
+        """解析参数并完成重复写、创建冲突、调用预算与强制重跑等预检。"""
+        try:
+            arguments = json.loads(tool_call.function.arguments)
+
+            if not isinstance(arguments, dict):
+                raise ValueError(  # noqa: TRY004 - normalized below
+                    "工具参数必须是 JSON 对象。"
                 )
 
-            if (
-                tool_result.status is ToolStatus.FAILURE
-                and self._is_boundary_failure(tool_result)
-            ):
-                reason = tool_result.error or "工具访问违反工作区安全边界。"
-                self.trace.record(
-                    "safety_rejected",
-                    rejection_type="workspace_boundary",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    reason=reason,
-                )
-                self.trace.record(
-                    "tool_call_finished",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    status=tool_result.status.value,
-                    result=tool_result.result,
-                    error=tool_result.error,
-                    rejected=True,
-                )
-                self.trace.record(
-                    "task_stopped",
-                    reason="workspace_boundary_violation",
-                    error=reason,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                )
-                return reason
-
-            if tool_result.status is ToolStatus.FAILURE and self.safety.validation_only:
-                reason = tool_result.error or "验收工具执行失败，已停止继续探索。"
-                self.trace.record(
-                    "tool_call_finished",
-                    tool=tool_name,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    status=tool_result.status.value,
-                    result=tool_result.result,
-                    error=tool_result.error,
-                )
-                self.trace.record(
-                    "task_stopped",
-                    reason="validation_failure",
-                    error=reason,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                )
-                return reason
-
+        except (json.JSONDecodeError, ValueError) as exc:
+            tool_result = ToolResult.failure(f"工具参数解析失败：{exc}")
             if self.context is not None:
                 before_trim = self.context.context.truncated_count
-                if tool_name == "run_tests":
-                    self.context.add_test_result(
-                        tool_result.data
-                        if isinstance(tool_result.data, TestRunResult)
-                        else (
-                            tool_result.result
-                            or tool_result.error
-                            or "测试执行失败"
-                        )
-                    )
-                else:
-                    self.context.add_tool_result(tool_result)
+                self.context.add_tool_result(tool_result)
                 if self.context.context.truncated_count > before_trim:
                     self.trace.record(
                         "context_trimmed",
                         tool_call_id=tool_call.id,
-                        truncated_count=self.context.context.truncated_count,
+                        truncated_count=(
+                            self.context.context.truncated_count
+                        ),
                     )
-            if self.state_manager is not None:
-                current = self.state_manager.state().current_step_id
-                if current is not None and self.state_manager.should_advance_for_tool(
-                    current, tool_name, arguments
-                ):
-                    self.state_manager.complete_step(current, tool_result.result)
-                    self.plan = self.state_manager.state().plan
-                    self.trace.record(
-                        "plan_step_status_changed",
-                        tool_call_id=tool_call.id,
-                        step_id=current,
-                        status="completed",
-                        reason="后续阶段已开始",
-                    )
-                    current = None
-                if current is None:
-                    pending = self.state_manager.match_step(tool_name, arguments)
-                    if pending is not None:
-                        self.state_manager.start_step(pending)
-                        current = pending
-                if current is not None:
-                    if tool_result.status is ToolStatus.SUCCESS:
-                        if self.state_manager.can_complete_step(
-                            current, tool_name, arguments, tool_result
-                        ):
-                            self.state_manager.complete_step(current, tool_result.result)
-                        # 工具成功但未满足当前步骤条件时，保留 running 状态，
-                        # 等待匹配的工具结果，不能误标记为失败。
-                    elif tool_result.status is ToolStatus.CANCELLED:
-                        self.state_manager.cancel_step(
-                            current, tool_result.result or "工具已取消"
-                        )
-                    else:
-                        self.state_manager.fail_step(
-                            current, tool_result.error or "工具执行失败"
-                        )
-                    self.plan = self.state_manager.state().plan
-                    updated_step = next(
-                        step
-                        for step in self.plan.steps
-                        if step.step_id == current
-                    )
-                    self.trace.record(
-                        "plan_step_status_changed",
-                        tool_call_id=tool_call.id,
-                        step_id=current,
-                        status=updated_step.status.value,
-                    )
-                    self.context.update_plan(
-                        self.plan,
-                        self.state_manager.state().current_step_id,
-                    )
-
-            plan_failed = bool(
-                self.state_manager is not None and self.state_manager.state().failed_step_ids
-            )
-            try:
-                recovery = self.safety.observe(
-                    tool_name,
-                    tool_result,
-                    plan_failed=plan_failed,
-                    arguments=arguments,
-                )
-            except Exception as exc:  # noqa: BLE001 - self.safety boundary
-                recovery = RecoveryDecision(
-                    RecoveryAction.STOP,
-                    f"无法生成安全恢复决策：{exc}",
-                )
-            self.recovery_decision = recovery
-            change_summary = self.safety.change_set.summary()
             self.trace.record(
-                "change_set_updated",
+                "tool_arguments_invalid",
+                tool=tool_name,
                 tool_call_id=tool_call.id,
                 request_id=request_id,
-                comparison_basis="task_initial_state",
-                touched_count=change_summary.touched_count,
-                unchanged_count=change_summary.unchanged_count,
-                changed_count=change_summary.net_changed_count,
-                net_changed_count=change_summary.net_changed_count,
-                created_paths=change_summary.created_paths,
-                modified_paths=change_summary.modified_paths,
-                deleted_paths=change_summary.deleted_paths,
+                status=tool_result.status.value,
+                error=str(exc),
             )
-            recovery_id = f"recovery-{tool_call.id}"
-            if recovery.action is not RecoveryAction.CONTINUE:
-                self.trace.record(
-                    "recovery_decided",
-                    recovery_id=recovery_id,
-                    tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    action=recovery.action.value,
-                    reason=recovery.reason,
-                    triggers=recovery.triggers,
-                    recoverable_paths=recovery.recoverable_paths,
-                )
+            self._debug_print(
+                f"[Tool Error] {tool_name}: {tool_result.to_json()}"
+            )
 
-            trace_details: dict[str, Any] = {}
-            if isinstance(tool_result.data, TestRunResult):
-                trace_details["test"] = tool_result.data.to_dict()
+            self.messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": tool_result.to_json(),
+                }
+            )
+
+            # 让模型根据错误重新决定，而不是继续当前批次。
+            return _PreparedCall(_CallDecision.ABORT)
+
+        self.trace.record(
+            "tool_call_started",
+            tool=tool_name,
+            arguments=arguments,
+            tool_call_id=tool_call.id,
+            request_id=request_id,
+        )
+        self._debug_print(
+            f"[Tool] {tool_name}({json.dumps(arguments, ensure_ascii=False)})"
+        )
+
+        cached_result = self.safety.completed_mutation(tool_name, arguments)
+        if cached_result is not None:
+            if tool_name == "create_directory":
+                cached_result = ToolResult.success(
+                    f"无需创建，目录已存在：{arguments.get('path', '')}"
+                )
+            self.trace.record(
+                "duplicate_tool_call_skipped",
+                tool=tool_name,
+                arguments=arguments,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                reason="相同写操作已成功完成，复用先前结果。",
+            )
+            self.trace.record(
+                "tool_call_finished",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                status=cached_result.status.value,
+                result=cached_result.result,
+                error=cached_result.error,
+                cached=True,
+            )
+            result_json = cached_result.to_json()
+            self._debug_print(f"[Tool Result] {result_json[:500]}")
+            self.messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result_json,
+                }
+            )
+            self.messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "该写操作已经成功完成且目标状态仍然成立，"
+                        "不要再次请求相同操作；请继续下一个未完成目标。"
+                    ),
+                }
+            )
+            return _PreparedCall(_CallDecision.SKIP)
+
+        if tool_name == "create_file" and self.safety.task_created_file_exists(
+            arguments.get("path")
+        ):
+            path = str(arguments.get("path"))
+            redirect_result = ToolResult.success(
+                f"未重复创建：{path} 已由本任务创建；"
+                "如需改变内容，请基于已知内容调用 edit_file。"
+            )
+            self.trace.record(
+                "conflicting_create_redirected",
+                tool=tool_name,
+                path=path,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                reason="本任务创建的文件已存在，要求改用 edit_file。",
+            )
+            self.trace.record(
+                "tool_call_finished",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                status=redirect_result.status.value,
+                result=redirect_result.result,
+                error=None,
+                redirected=True,
+            )
+            result_json = redirect_result.to_json()
+            self._debug_print(f"[Tool Result] {result_json[:500]}")
+            self.messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result_json,
+                }
+            )
+            self.messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"`{path}` 已由本任务创建。不要再次 create_file；"
+                        "如需调整内容，请使用 edit_file，"
+                        "否则继续创建下一个尚未完成的文件。"
+                    ),
+                }
+            )
+            return _PreparedCall(_CallDecision.SKIP)
+
+        if self.tool_call_count >= self.max_tool_calls:
+            reason = (
+                f"已达到工具调用上限 {self.max_tool_calls}，"
+                "停止执行。请缩小任务范围后重试。"
+            )
+            self.trace.record(
+                "task_stopped",
+                reason="max_tool_calls",
+                limit=self.max_tool_calls,
+                request_id=request_id,
+            )
+            return _PreparedCall(_CallDecision.FINISH, answer=reason)
+
+        rerun_block_reason = self.safety.test_rerun_block_reason(
+            tool_name, arguments
+        )
+        if rerun_block_reason is not None:
+            self.tool_call_count += 1
+            tool_result = ToolResult.cancelled(rerun_block_reason)
+            if self.context is not None:
+                self.context.add_tool_result(tool_result)
+            self.trace.record(
+                "safety_rejected",
+                rejection_type="test_rerun_without_mutation",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                reason=rerun_block_reason,
+            )
             self.trace.record(
                 "tool_call_finished",
                 tool=tool_name,
@@ -979,12 +746,10 @@ class TaskRunner:
                 status=tool_result.status.value,
                 result=tool_result.result,
                 error=tool_result.error,
-                is_error=tool_result.status is ToolStatus.FAILURE,
-                **trace_details,
+                rejected=True,
             )
             result_json = tool_result.to_json()
             self._debug_print(f"[Tool Result] {result_json[:500]}")
-
             self.messages.append(
                 {
                     "role": "tool",
@@ -992,70 +757,394 @@ class TaskRunner:
                     "content": result_json,
                 }
             )
+            self.messages.append(
+                {
+                    "role": "system",
+                    "content": rerun_block_reason,
+                }
+            )
+            return _PreparedCall(_CallDecision.ABORT)
+        return _PreparedCall(_CallDecision.EXECUTE, arguments)
 
-            if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
-                reason, _ = self._rollback_and_replan(
-                    recovery,
-                    recovery_id,
-                    {"tool_call_id": tool_call.id},
-                )
-                if reason is not None:
-                    return reason
-                return None
-            if recovery.action is RecoveryAction.REPLAN:
-                # 只有真正重建计划才消耗重规划预算，避免未应用的决策污染计数。
-                self.safety.note_replan()
-                self.project_snapshot = ProjectExplorer(self.workspace).explore()
-                decision = judge_task_complexity(self.task, self.project_snapshot)
-                replacement_plan = create_task_plan(
-                    self.task, self.project_snapshot, decision
-                )
-                prior_plan = self.plan
-                self.plan = (
-                    replacement_plan
-                    if prior_plan is None
-                    else carry_completed_steps(prior_plan, replacement_plan)
-                )
-                self.state_manager = PlanStateManager(self.plan)
-                self.context.begin_replan(self.plan)
-                self.messages.append(
-                    {
-                        "role": "system",
-                        "content": (
-                            "当前执行失败，失败输出已保留。请先根据错误定位根因，"
-                            "调用读取或编辑工具完成一次实际修复后再重跑测试；"
-                            "不要在未修改相关代码时重复运行同一失败测试。"
-                            "已刷新项目状态并重新规划：\n"
-                            f"{self.plan.to_json()}"
-                        ),
-                    }
-                )
-                return None
+    def _execute_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        tool_call: Any,
+        request_id: str,
+    ) -> tuple[ToolResult, tuple[str, ...], dict[str, dict], str | None]:
+        """执行一次工具调用，返回结果、快照基线与可能的结束原因。"""
+        snapshot_paths: tuple[str, ...] = ()
+        pre_tool_changes: dict[str, dict] = {}
+        try:
+            self.safety.validate_tool(tool_name, arguments)
+            snapshot_paths = self.safety.prepare_tool(tool_name, arguments)
+            pre_tool_changes = {
+                change.path: change.to_dict()
+                for change in self.safety.change_set.summary().changes
+            }
+            tool_result = self.registry.execute(
+                tool_name,
+                arguments,
+                event_recorder=self.trace.record,
+            )
+        except KeyboardInterrupt:
+            self.trace.record(
+                "task_stopped",
+                reason="user_interrupted",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+            )
+            raise
+        except TaskConstraintViolation as exc:
+            tool_result = ToolResult.cancelled(str(exc))
+            self.tool_call_count += 1
+            self.trace.record(
+                "safety_rejected",
+                rejection_type="user_constraint",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                reason=str(exc),
+            )
+            self.trace.record(
+                "tool_call_finished",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                status=tool_result.status.value,
+                result=tool_result.result,
+                error=tool_result.error,
+                rejected=True,
+            )
+            self.trace.record(
+                "task_stopped",
+                reason="user_constraint_violation",
+                error=str(exc),
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+            )
+            return tool_result, (), {}, str(exc)
+        except Exception as exc:  # noqa: BLE001 - tool boundary
+            tool_result = ToolResult.failure(f"工具执行异常：{exc}")
+        return tool_result, snapshot_paths, pre_tool_changes, None
 
-            if recovery.action is RecoveryAction.STOP:
+    def _apply_tool_result(
+        self,
+        *,
+        tool_call: Any,
+        tool_name: str,
+        arguments: dict[str, Any],
+        snapshot_paths: tuple[str, ...],
+        pre_tool_changes: dict[str, dict],
+        tool_result: ToolResult,
+        request_id: str,
+        remaining_calls: int,
+    ) -> tuple[str | None, bool]:
+        """记录一次工具执行结果并处理恢复决策。
+
+        返回 ``(结束原因, 是否中断本批次)``：结束原因非空时任务应立即返回，
+        否则按第二项决定是本批次中断还是继续下一个调用。
+        """
+        self.tool_call_count += 1
+        reported_mutation = self.safety.record_completed_mutation(
+            tool_name, arguments, tool_result
+        )
+        post_tool_changes = self.safety.change_set.summary()
+        post_tool_changes_by_path = {
+            change.path: change.to_dict()
+            for change in post_tool_changes.changes
+        }
+        changed_snapshot_paths = tuple(
+            path
+            for path in snapshot_paths
+            if pre_tool_changes.get(path) != post_tool_changes_by_path.get(path)
+        )
+        if changed_snapshot_paths:
+            self.trace.record(
+                "snapshot_created",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                paths=changed_snapshot_paths,
+                purpose="rollback_baseline",
+            )
+        mutation_applied = bool(changed_snapshot_paths) or (
+            reported_mutation and not snapshot_paths
+        )
+        if mutation_applied:
+            mutation_path = arguments.get("path")
+            self.safety.record_mutation_applied(
+                mutation_path if isinstance(mutation_path, str) else None
+            )
+            self.trace.record(
+                "mutation_applied",
+                tool=tool_name,
+                path=arguments.get("path"),
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                tool_status=tool_result.status.value,
+                net_change=any(
+                    path in post_tool_changes_by_path
+                    for path in changed_snapshot_paths
+                ),
+            )
+
+        if (
+            tool_result.status is ToolStatus.FAILURE
+            and self._is_boundary_failure(tool_result)
+        ):
+            reason = tool_result.error or "工具访问违反工作区安全边界。"
+            self.trace.record(
+                "safety_rejected",
+                rejection_type="workspace_boundary",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                reason=reason,
+            )
+            self.trace.record(
+                "tool_call_finished",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                status=tool_result.status.value,
+                result=tool_result.result,
+                error=tool_result.error,
+                rejected=True,
+            )
+            self.trace.record(
+                "task_stopped",
+                reason="workspace_boundary_violation",
+                error=reason,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+            )
+            return reason, False
+
+        if tool_result.status is ToolStatus.FAILURE and self.safety.validation_only:
+            reason = tool_result.error or "验收工具执行失败，已停止继续探索。"
+            self.trace.record(
+                "tool_call_finished",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                status=tool_result.status.value,
+                result=tool_result.result,
+                error=tool_result.error,
+            )
+            self.trace.record(
+                "task_stopped",
+                reason="validation_failure",
+                error=reason,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+            )
+            return reason, False
+
+        if self.context is not None:
+            before_trim = self.context.context.truncated_count
+            if tool_name == "run_tests":
+                self.context.add_test_result(
+                    tool_result.data
+                    if isinstance(tool_result.data, TestRunResult)
+                    else (
+                        tool_result.result
+                        or tool_result.error
+                        or "测试执行失败"
+                    )
+                )
+            else:
+                self.context.add_tool_result(tool_result)
+            if self.context.context.truncated_count > before_trim:
                 self.trace.record(
-                    "task_stopped",
-                    reason=recovery.reason,
-                    recovery_id=recovery_id,
+                    "context_trimmed",
                     tool_call_id=tool_call.id,
+                    truncated_count=self.context.context.truncated_count,
                 )
-                return recovery.reason
-
-            # 批次采用失败关闭规则：失败或取消后均停止剩余调用，
-            # 避免后续工具建立在无效前置结果之上。
-            if tool_result.status is not ToolStatus.SUCCESS:
+        if self.state_manager is not None:
+            current = self.state_manager.state().current_step_id
+            if current is not None and self.state_manager.should_advance_for_tool(
+                current, tool_name, arguments
+            ):
+                self.state_manager.complete_step(current, tool_result.result)
+                self.plan = self.state_manager.state().plan
                 self.trace.record(
-                    "tool_batch_aborted",
-                    tool=tool_name,
+                    "plan_step_status_changed",
                     tool_call_id=tool_call.id,
-                    request_id=request_id,
-                    status=tool_result.status.value,
-                    skipped_calls=len(message.tool_calls) - call_index - 1,
+                    step_id=current,
+                    status="completed",
+                    reason="后续阶段已开始",
                 )
-                return None
+                current = None
+            if current is None:
+                pending = self.state_manager.match_step(tool_name, arguments)
+                if pending is not None:
+                    self.state_manager.start_step(pending)
+                    current = pending
+            if current is not None:
+                if tool_result.status is ToolStatus.SUCCESS:
+                    if self.state_manager.can_complete_step(
+                        current, tool_name, arguments, tool_result
+                    ):
+                        self.state_manager.complete_step(current, tool_result.result)
+                    # 工具成功但未满足当前步骤条件时，保留 running 状态，
+                    # 等待匹配的工具结果，不能误标记为失败。
+                elif tool_result.status is ToolStatus.CANCELLED:
+                    self.state_manager.cancel_step(
+                        current, tool_result.result or "工具已取消"
+                    )
+                else:
+                    self.state_manager.fail_step(
+                        current, tool_result.error or "工具执行失败"
+                    )
+                self.plan = self.state_manager.state().plan
+                updated_step = next(
+                    step
+                    for step in self.plan.steps
+                    if step.step_id == current
+                )
+                self.trace.record(
+                    "plan_step_status_changed",
+                    tool_call_id=tool_call.id,
+                    step_id=current,
+                    status=updated_step.status.value,
+                )
+                self.context.update_plan(
+                    self.plan,
+                    self.state_manager.state().current_step_id,
+                )
 
+        plan_failed = bool(
+            self.state_manager is not None and self.state_manager.state().failed_step_ids
+        )
+        try:
+            recovery = self.safety.observe(
+                tool_name,
+                tool_result,
+                plan_failed=plan_failed,
+                arguments=arguments,
+            )
+        except Exception as exc:  # noqa: BLE001 - self.safety boundary
+            recovery = RecoveryDecision(
+                RecoveryAction.STOP,
+                f"无法生成安全恢复决策：{exc}",
+            )
+        self.recovery_decision = recovery
+        change_summary = self.safety.change_set.summary()
+        self.trace.record(
+            "change_set_updated",
+            tool_call_id=tool_call.id,
+            request_id=request_id,
+            comparison_basis="task_initial_state",
+            touched_count=change_summary.touched_count,
+            unchanged_count=change_summary.unchanged_count,
+            changed_count=change_summary.net_changed_count,
+            net_changed_count=change_summary.net_changed_count,
+            created_paths=change_summary.created_paths,
+            modified_paths=change_summary.modified_paths,
+            deleted_paths=change_summary.deleted_paths,
+        )
+        recovery_id = f"recovery-{tool_call.id}"
+        if recovery.action is not RecoveryAction.CONTINUE:
+            self.trace.record(
+                "recovery_decided",
+                recovery_id=recovery_id,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                action=recovery.action.value,
+                reason=recovery.reason,
+                triggers=recovery.triggers,
+                recoverable_paths=recovery.recoverable_paths,
+            )
 
-        return None
+        trace_details: dict[str, Any] = {}
+        if isinstance(tool_result.data, TestRunResult):
+            trace_details["test"] = tool_result.data.to_dict()
+        self.trace.record(
+            "tool_call_finished",
+            tool=tool_name,
+            tool_call_id=tool_call.id,
+            request_id=request_id,
+            status=tool_result.status.value,
+            result=tool_result.result,
+            error=tool_result.error,
+            is_error=tool_result.status is ToolStatus.FAILURE,
+            **trace_details,
+        )
+        result_json = tool_result.to_json()
+        self._debug_print(f"[Tool Result] {result_json[:500]}")
+
+        self.messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result_json,
+            }
+        )
+
+        if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
+            reason, _ = self._rollback_and_replan(
+                recovery,
+                recovery_id,
+                {"tool_call_id": tool_call.id},
+            )
+            if reason is not None:
+                return reason, False
+            return None, True
+        if recovery.action is RecoveryAction.REPLAN:
+            # 只有真正重建计划才消耗重规划预算，避免未应用的决策污染计数。
+            self.safety.note_replan()
+            self.project_snapshot = ProjectExplorer(self.workspace).explore()
+            decision = judge_task_complexity(self.task, self.project_snapshot)
+            replacement_plan = create_task_plan(
+                self.task, self.project_snapshot, decision
+            )
+            prior_plan = self.plan
+            self.plan = (
+                replacement_plan
+                if prior_plan is None
+                else carry_completed_steps(prior_plan, replacement_plan)
+            )
+            self.state_manager = PlanStateManager(self.plan)
+            self.context.begin_replan(self.plan)
+            self.messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "当前执行失败，失败输出已保留。请先根据错误定位根因，"
+                        "调用读取或编辑工具完成一次实际修复后再重跑测试；"
+                        "不要在未修改相关代码时重复运行同一失败测试。"
+                        "已刷新项目状态并重新规划：\n"
+                        f"{self.plan.to_json()}"
+                    ),
+                }
+            )
+            return None, True
+
+        if recovery.action is RecoveryAction.STOP:
+            self.trace.record(
+                "task_stopped",
+                reason=recovery.reason,
+                recovery_id=recovery_id,
+                tool_call_id=tool_call.id,
+            )
+            return recovery.reason, False
+
+        # 批次采用失败关闭规则：失败或取消后均停止剩余调用，
+        # 避免后续工具建立在无效前置结果之上。
+        if tool_result.status is not ToolStatus.SUCCESS:
+            self.trace.record(
+                "tool_batch_aborted",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                request_id=request_id,
+                status=tool_result.status.value,
+                skipped_calls=remaining_calls,
+            )
+            return None, True
+        return None, False
 
     def _rollback_and_replan(
         self,
