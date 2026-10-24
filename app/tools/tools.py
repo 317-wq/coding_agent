@@ -156,7 +156,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "delete_file",
-            "description": "删除工作区内的指定文件。必须向用户请求确认，只有用户明确输入 y 才能删除。",
+            "description": "删除工作区内的指定文件，属于高风险操作，执行前必须经过用户授权。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -171,7 +171,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "delete_directory",
-            "description": "逐项删除工作区内的指定目录。每个文件、子目录和目录自身都必须分别向用户请求确认，只有输入 y 才能删除；禁止递归强制删除。",
+            "description": "删除工作区内的指定目录，属于高风险操作，执行前会列出将被删除的文件清单并请求一次授权；不跟随符号链接，禁止递归强制删除。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -624,21 +624,6 @@ def run_tests(test_path: str = ".") -> ToolResult:
         return ToolResult.failure(f"测试执行失败：{exc}")
 
 
-def _confirm_delete(path: Path) -> bool:
-    """逐项请求用户确认；非交互环境或确认失败时默认拒绝。"""
-    try:
-        if not sys.stdin.isatty():
-            return False
-
-        answer = input(
-            f"确认删除 {path}？此操作不可撤销。请输入 y 确认："
-        ).strip()
-
-        return answer.lower() == "y"
-    except (EOFError, OSError):
-        return False
-
-
 def delete_file(path: str) -> str:
     """删除工作区内的指定文件，必须经过用户确认。"""
     try:
@@ -653,10 +638,7 @@ def delete_file(path: str) -> str:
         if not target.is_file():
             return f"错误：目标不是普通文件：{path}"
 
-        if not _confirm_delete(target):
-            return f"已取消删除：{path}"
-
-        # 确认后再次检查路径，防止确认期间路径指向发生变化。
+        # 授权后再次检查路径，防止授权期间路径指向发生变化。
         verified = _resolve_path(path)
         if verified != target or verified.is_symlink() or not verified.is_file():
             return f"错误：目标路径状态发生变化，已拒绝删除：{path}"
@@ -668,8 +650,33 @@ def delete_file(path: str) -> str:
         return f"错误：删除文件失败：{exc}"
 
 
+def describe_directory_deletion(arguments: dict[str, Any]) -> dict[str, Any]:
+    """生成目录删除的授权清单，列出将被删除的普通文件路径。
+
+    入参是工具调用参数；该清单只用于授权展示，实际删除会重新枚举目录，
+    避免使用过期快照。
+    """
+    path = arguments.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("路径不能为空。")
+
+    target = _resolve_path(path)
+    if target.is_symlink() or not target.is_dir():
+        return {"path": path, "file_count": 0, "files": []}
+    files = [
+        child.relative_to(WORKSPACE).as_posix()
+        for child in sorted(target.rglob("*"))
+        if child.is_file() and not child.is_symlink()
+    ]
+    return {
+        "path": path,
+        "file_count": len(files),
+        "files": files[:MAX_LIST_ENTRIES],
+    }
+
+
 def delete_directory(path: str) -> str:
-    """逐项确认删除目录内容，最后单独确认删除目录本身。"""
+    """删除目录内容并移除空目录；授权由工具注册表在调用前统一完成。"""
     try:
         target = _resolve_path(path)
 
@@ -704,7 +711,7 @@ def delete_directory(path: str) -> str:
                 continue
 
             if child.is_dir():
-                # 递归调用同一删除逻辑，子目录本身也会单独确认。
+                # 递归调用同一删除逻辑，子目录在清空后一并移除。
                 result = delete_directory(relative_path)
                 results.append(result)
             elif child.is_file():
@@ -715,12 +722,7 @@ def delete_directory(path: str) -> str:
                     f"跳过不支持的文件类型：{relative_path}"
                 )
 
-        # 所有子项目处理完毕后，才单独确认当前目录。
-        if not _confirm_delete(target):
-            results.append(f"已取消删除目录：{path}")
-            return "\n".join(results)
-
-        # 不使用 shutil.rmtree；仅删除空目录。
+        # 授权已在注册表层完成；不使用 shutil.rmtree，仅删除空目录。
         verified = _resolve_path(path)
 
         if verified != target or verified.is_symlink() or not verified.is_dir():
