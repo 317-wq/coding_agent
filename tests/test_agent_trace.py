@@ -4,6 +4,7 @@ from app.core.agent import Agent
 from app.runtime.workspace import WorkspaceContext
 from app.tools.registry import ToolRegistry, ToolSpec
 from app.tools.result import ToolResult
+from tests.stub_tools import passed_test
 
 PARAMETERS = {
     "type": "object",
@@ -24,7 +25,7 @@ def _response(content=None, tool_calls=None):
 
 def test_trace_records_planning_state_and_completion_events(monkeypatch, tmp_path):
     registry = ToolRegistry()
-    for tool_name in ("read_file", "create_file", "run_tests"):
+    for tool_name in ("read_file", "create_file"):
         registry.register(
             ToolSpec(
                 name=tool_name,
@@ -33,6 +34,14 @@ def test_trace_records_planning_state_and_completion_events(monkeypatch, tmp_pat
                 executor=lambda: ToolResult.success("步骤完成"),
             )
         )
+    registry.register(
+        ToolSpec(
+            name="run_tests",
+            description="运行测试",
+            parameters=PARAMETERS,
+            executor=passed_test,
+        )
+    )
 
     def call(call_id, name):
         return SimpleNamespace(
