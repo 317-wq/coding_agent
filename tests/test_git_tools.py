@@ -4,7 +4,12 @@ from pathlib import Path
 from app.runtime.workspace import WorkspaceContext
 from app.tools.git_tools import GitReadTools
 from app.tools.registry import build_default_registry
-from app.tools.result import ToolStatus
+from app.tools.result import ToolResult, ToolStatus
+
+
+def _text(result: ToolResult) -> str:
+    """取出 Git 工具结果中面向人的文本。"""
+    return result.result or result.error or ""
 
 
 def _git(path: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -31,8 +36,8 @@ def test_status_and_diff_read_workspace_changes(tmp_path: Path):
     (tmp_path / "tracked.txt").write_text("after\n", encoding="utf-8")
     reader = GitReadTools(WorkspaceContext.from_path(tmp_path))
 
-    assert "tracked.txt" in reader.status()
-    diff = reader.diff()
+    assert "tracked.txt" in _text(reader.status())
+    diff = _text(reader.diff())
     assert "-before" in diff
     assert "+after" in diff
 
@@ -43,8 +48,8 @@ def test_staged_diff_is_selected_explicitly(tmp_path: Path):
     _git(tmp_path, "add", "tracked.txt")
     reader = GitReadTools(WorkspaceContext.from_path(tmp_path))
 
-    assert reader.diff() == "工作区内没有对应的 Git 差异。"
-    assert "+staged" in reader.diff(staged=True)
+    assert _text(reader.diff()) == "工作区内没有对应的 Git 差异。"
+    assert "+staged" in _text(reader.diff(staged=True))
 
 
 def test_subdirectory_workspace_does_not_expose_parent_changes(tmp_path: Path):
@@ -55,7 +60,7 @@ def test_subdirectory_workspace_does_not_expose_parent_changes(tmp_path: Path):
     (child / "inside.txt").write_text("inside\n", encoding="utf-8")
     reader = GitReadTools(WorkspaceContext.from_path(child))
 
-    status = reader.status()
+    status = _text(reader.status())
     assert "child/inside.txt" in status
     assert "tracked.txt" not in status
 
@@ -63,8 +68,8 @@ def test_subdirectory_workspace_does_not_expose_parent_changes(tmp_path: Path):
 def test_non_repository_is_reported_without_failing_read_tool(tmp_path: Path):
     reader = GitReadTools(WorkspaceContext.from_path(tmp_path))
 
-    assert reader.status() == "当前工作区不是 Git 仓库，无法提供 Git 查询结果。"
-    assert reader.diff() == "当前工作区不是 Git 仓库，无法提供 Git 查询结果。"
+    assert _text(reader.status()) == "当前工作区不是 Git 仓库，无法提供 Git 查询结果。"
+    assert _text(reader.diff()) == "当前工作区不是 Git 仓库，无法提供 Git 查询结果。"
 
     registry = build_default_registry(WorkspaceContext.from_path(tmp_path))
     assert registry.execute("git_status", {}).status is ToolStatus.SUCCESS
@@ -73,7 +78,7 @@ def test_non_repository_is_reported_without_failing_read_tool(tmp_path: Path):
 def test_git_query_outside_workspace_is_rejected(tmp_path: Path):
     reader = GitReadTools(WorkspaceContext.from_path(tmp_path))
 
-    assert reader.diff("../outside").startswith("错误：Git 查询路径无效")
+    assert _text(reader.diff("../outside")).startswith("Git 查询路径无效")
 
 
 def test_registry_exposes_only_fixed_read_only_git_tools(tmp_path: Path):

@@ -7,6 +7,7 @@ from app.core.agent import Agent
 from app.core.task_result import TaskStatus
 from app.runtime.workspace import WorkspaceContext
 from app.tools.registry import ToolRegistry, ToolSpec
+from app.tools.result import ToolResult
 
 
 def _response(content=None):
@@ -38,7 +39,7 @@ def test_agent_report_uses_final_state_instead_of_model_claims(monkeypatch, tmp_
     def create_file(path, content):
         """在测试工作区实际创建指定文件。"""
         (tmp_path / path).write_text(content, encoding="utf-8")
-        return "创建成功"
+        return ToolResult.success("创建成功")
 
     registry.register(
         ToolSpec(

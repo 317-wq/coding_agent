@@ -132,7 +132,12 @@ def normal_completion(monkeypatch, tmp_path: Path) -> Agent:
     registry = ToolRegistry()
     for name in ("read_file", "create_file"):
         registry.register(
-            ToolSpec(name, f"执行 {name}", EMPTY_PARAMETERS, lambda: "ok")
+            ToolSpec(
+                name,
+                f"执行 {name}",
+                EMPTY_PARAMETERS,
+                lambda: ToolResult.success("ok"),
+            )
         )
     registry.register(
         ToolSpec(
@@ -166,12 +171,12 @@ def test_failure_then_repair(monkeypatch, tmp_path: Path) -> Agent:
 
     edits = {"count": 0}
 
-    def edit(path: str) -> str:
+    def edit(path: str) -> ToolResult:
         edits["count"] += 1
         (tmp_path / path).write_text(
             f"VALUE = {edits['count'] + 1}\n", encoding="utf-8"
         )
-        return f"修改文件成功并已核验：{path}"
+        return ToolResult.success(f"修改文件成功并已核验：{path}")
 
     def run_tests(test_path: str = ".") -> ToolResult:
         state["tests"] += 1
@@ -206,12 +211,12 @@ def _repair_exhaustion(
 
     edits = {"count": 0}
 
-    def edit(path: str) -> str:
+    def edit(path: str) -> ToolResult:
         edits["count"] += 1
         (tmp_path / path).write_text(
             f"VALUE = {edits['count'] + 8}\n", encoding="utf-8"
         )
-        return f"修改文件成功并已核验：{path}"
+        return ToolResult.success(f"修改文件成功并已核验：{path}")
 
     registry = ToolRegistry(authorizer=StubAuthorizer(decision))
     registry.register(ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, edit))
@@ -250,12 +255,12 @@ def rollback_denied(monkeypatch, tmp_path: Path) -> Agent:
 def change_set_failure(monkeypatch, tmp_path: Path) -> Agent:
     """触碰路径被外部改成符号链接，任务降级为 blocked。"""
 
-    def break_into_symlink(path: str) -> str:
+    def break_into_symlink(path: str) -> ToolResult:
         target = tmp_path / path
         target.write_text("内容", encoding="utf-8")
         target.unlink()
         target.symlink_to(tmp_path / "elsewhere")
-        return "已写入"
+        return ToolResult.success("已写入")
 
     registry = ToolRegistry()
     registry.register(

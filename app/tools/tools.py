@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.runtime.workspace import WorkspaceContext
-from app.tools.result import ToolResult
+from app.tools.result import ToolResult, ToolStatus
 from app.tools.test_result import TestRunResult, TestRunStatus
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -199,14 +199,14 @@ class WorkspaceTools:
         return self.workspace.resolve(path)
 
 
-    def list_files(self, path: str = ".", recursive: bool = True) -> str:
+    def list_files(self, path: str = ".", recursive: bool = True) -> ToolResult:
         """列出指定目录中的文件和子目录。"""
 
         try:
             directory = self._resolve_path(path)
 
             if not directory.is_dir():
-                return f"错误：目录不存在：{path}"
+                return ToolResult.failure(f"目录不存在：{path}")
 
             entries: list[str] = []
             stack = [directory]
@@ -238,58 +238,58 @@ class WorkspaceTools:
                         break
 
             if not entries:
-                return "目录为空，或没有可列出的文件。"
+                return ToolResult.success("目录为空，或没有可列出的文件。")
 
             result = "\n".join(entries)
 
             if stack or len(entries) >= MAX_LIST_ENTRIES:
                 result += f"\n结果已达到 {MAX_LIST_ENTRIES} 条上限。"
 
-            return result
+            return ToolResult.success(result)
 
         except (ValueError, OSError) as exc:
-            return f"错误：{exc}"
+            return ToolResult.failure(f"{exc}")
 
 
-    def read_file(self, path: str) -> str:
+    def read_file(self, path: str) -> ToolResult:
         """读取工作目录中的文本文件。"""
 
         try:
             file_path = self._resolve_path(path)
 
             if not file_path.is_file():
-                return f"错误：文件不存在：{path}"
+                return ToolResult.failure(f"文件不存在：{path}")
 
             if file_path.stat().st_size > MAX_FILE_SIZE:
-                return "错误：文件超过 1 MB，拒绝读取。"
+                return ToolResult.failure("文件超过 1 MB，拒绝读取。")
 
             content = file_path.read_text(encoding="utf-8")
 
             if not content:
-                return f"文件存在，但内容为空：{path}"
+                return ToolResult.success(f"文件存在，但内容为空：{path}")
 
-            return content
+            return ToolResult.success(content)
 
         except (ValueError, OSError, UnicodeError) as exc:
-            return f"错误：读取文件失败：{exc}"
+            return ToolResult.failure(f"读取文件失败：{exc}")
 
 
-    def search_code(self, keyword: str, path: str = ".") -> str:
+    def search_code(self, keyword: str, path: str = ".") -> ToolResult:
         """通过 rg 搜索关键词，返回匹配路径、行号和内容。"""
 
         if not keyword or not keyword.strip():
-            return "错误：搜索关键词不能为空。"
+            return ToolResult.failure("搜索关键词不能为空。")
 
         rg_path = shutil.which("rg")
 
         if rg_path is None:
-            return "错误：未找到 rg，请先安装 ripgrep。"
+            return ToolResult.failure("未找到 rg，请先安装 ripgrep。")
 
         try:
             search_path = self._resolve_path(path)
 
             if not search_path.is_dir():
-                return f"错误：搜索目录不存在：{path}"
+                return ToolResult.failure(f"搜索目录不存在：{path}")
 
             # 显式排除无关目录，不依赖 .gitignore 是否存在
             command = [
@@ -358,11 +358,11 @@ class WorkspaceTools:
 
             # rg: 0 = 找到匹配，1 = 没有匹配，2 = 搜索错误
             if result.returncode == 1:
-                return f"没有找到关键词：{keyword}"
+                return ToolResult.success(f"没有找到关键词：{keyword}")
 
             if result.returncode != 0:
                 error = result.stderr.strip() or "未知搜索错误"
-                return f"错误：rg 搜索失败（退出码 {result.returncode}）：{error}"
+                return ToolResult.failure(f"rg 搜索失败（退出码 {result.returncode}）：{error}")
 
             # 将绝对路径转换为工作目录相对路径
             lines = result.stdout.splitlines()
@@ -389,94 +389,94 @@ class WorkspaceTools:
                 output = output[:MAX_SEARCH_OUTPUT]
                 output += "\n输出过长，已截断。"
 
-            return output or f"没有找到关键词：{keyword}"
+            return ToolResult.success(output or f"没有找到关键词：{keyword}")
 
         except subprocess.TimeoutExpired:
-            return f"错误：搜索超过 {SEARCH_TIMEOUT} 秒，已终止。"
+            return ToolResult.failure(f"搜索超过 {SEARCH_TIMEOUT} 秒，已终止。")
         except (ValueError, OSError) as exc:
-            return f"错误：搜索失败：{exc}"
+            return ToolResult.failure(f"搜索失败：{exc}")
 
 
-    def create_directory(self, path: str) -> str:
+    def create_directory(self, path: str) -> ToolResult:
         """创建目录，支持一次创建多层目录。"""
 
         try:
             if not path or path == ".":
-                return "错误：请指定要创建的目录路径。"
+                return ToolResult.failure("请指定要创建的目录路径。")
 
             directory = self._resolve_path(path)
 
             if directory.exists():
                 if directory.is_dir():
-                    return f"错误：目录已经存在：{path}"
-                return f"错误：目标路径已被文件占用：{path}"
+                    return ToolResult.failure(f"目录已经存在：{path}")
+                return ToolResult.failure(f"目标路径已被文件占用：{path}")
 
             directory.mkdir(parents=True, exist_ok=False)
 
-            return f"创建目录成功：{path}"
+            return ToolResult.success(f"创建目录成功：{path}")
 
         except FileExistsError:
-            return f"错误：目标路径已经存在：{path}"
+            return ToolResult.failure(f"目标路径已经存在：{path}")
         except (ValueError, OSError) as exc:
-            return f"错误：创建目录失败：{exc}"
+            return ToolResult.failure(f"创建目录失败：{exc}")
 
 
-    def create_file(self, path: str, content: str) -> str:
+    def create_file(self, path: str, content: str) -> ToolResult:
         """创建新文件，不允许覆盖已有文件。"""
 
         try:
             file_path = self._resolve_path(path)
 
             if file_path.exists() or file_path.is_symlink():
-                return f"错误：文件或路径已经存在：{path}"
+                return ToolResult.failure(f"文件或路径已经存在：{path}")
 
             if not file_path.parent.is_dir():
-                return "错误：父目录不存在，请先调用 create_directory。"
+                return ToolResult.failure("父目录不存在，请先调用 create_directory。")
 
             if len(content.encode("utf-8")) > MAX_FILE_SIZE:
-                return "错误：文件内容超过 1 MB，拒绝创建。"
+                return ToolResult.failure("文件内容超过 1 MB，拒绝创建。")
 
             with file_path.open("x", encoding="utf-8", newline="") as file:
                 file.write(content)
 
             if file_path.read_text(encoding="utf-8") != content:
-                return "错误：创建后核验失败。"
+                return ToolResult.failure("创建后核验失败。")
 
-            return f"创建文件成功并已核验：{path}"
+            return ToolResult.success(f"创建文件成功并已核验：{path}")
 
         except FileExistsError:
-            return f"错误：文件或路径已经存在：{path}"
+            return ToolResult.failure(f"文件或路径已经存在：{path}")
         except (ValueError, OSError, UnicodeError) as exc:
-            return f"错误：创建文件失败：{exc}"
+            return ToolResult.failure(f"创建文件失败：{exc}")
 
 
-    def edit_file(self, path: str, old_text: str, new_text: str) -> str:
+    def edit_file(self, path: str, old_text: str, new_text: str) -> ToolResult:
         """替换已有文件中唯一匹配的文本。"""
 
         try:
             file_path = self._resolve_path(path)
 
             if not file_path.is_file():
-                return f"错误：文件不存在：{path}"
+                return ToolResult.failure(f"文件不存在：{path}")
 
             if file_path.stat().st_size > MAX_FILE_SIZE:
-                return "错误：文件超过 1 MB，拒绝修改。"
+                return ToolResult.failure("文件超过 1 MB，拒绝修改。")
 
             content = file_path.read_text(encoding="utf-8")
 
             if not old_text:
-                return "错误：old_text 不能为空。"
+                return ToolResult.failure("old_text 不能为空。")
 
             match_count = content.count(old_text)
 
             if match_count == 0:
                 if new_text and new_text in content:
-                    return f"无需修改，目标内容已存在：{self.workspace.relative_path(path)}"
-                return "错误：没有找到旧文本，文件未修改。"
+                    return ToolResult.success(f"无需修改，目标内容已存在：{self.workspace.relative_path(path)}")
+                return ToolResult.failure("没有找到旧文本，文件未修改。")
 
             if match_count > 1:
-                return (
-                    f"错误：旧文本出现 {match_count} 次，"
+                return ToolResult.failure(
+                    f"旧文本出现 {match_count} 次，"
                     "无法唯一定位，文件未修改。"
                 )
 
@@ -490,7 +490,7 @@ class WorkspaceTools:
                     os.fsync(file.fileno())
 
                 if file_path.read_text(encoding="utf-8") != content:
-                    return "错误：文件已发生变化，取消修改。"
+                    return ToolResult.failure("文件已发生变化，取消修改。")
 
                 temp_path.replace(file_path)
 
@@ -500,14 +500,14 @@ class WorkspaceTools:
 
             # 核对磁盘上的实际内容
             if file_path.read_text(encoding="utf-8") != updated_content:
-                return "错误：修改后核验失败。"
+                return ToolResult.failure("修改后核验失败。")
 
-            return f"修改文件成功并已核验：{path}"
+            return ToolResult.success(f"修改文件成功并已核验：{path}")
 
         except FileExistsError:
-            return "错误：临时文件已存在，请检查后重试。"
+            return ToolResult.failure("临时文件已存在，请检查后重试。")
         except (ValueError, OSError, UnicodeError) as exc:
-            return f"错误：修改文件失败：{exc}"
+            return ToolResult.failure(f"修改文件失败：{exc}")
 
 
 
@@ -626,30 +626,30 @@ class WorkspaceTools:
             return ToolResult.failure(f"测试执行失败：{exc}")
 
 
-    def delete_file(self, path: str) -> str:
+    def delete_file(self, path: str) -> ToolResult:
         """删除工作区内的指定文件，必须经过用户确认。"""
         try:
             target = self._resolve_path(path)
 
             if not target.exists() and not target.is_symlink():
-                return f"错误：文件不存在：{path}"
+                return ToolResult.failure(f"文件不存在：{path}")
 
             if target.is_symlink():
-                return f"错误：不允许删除符号链接：{path}"
+                return ToolResult.failure(f"不允许删除符号链接：{path}")
 
             if not target.is_file():
-                return f"错误：目标不是普通文件：{path}"
+                return ToolResult.failure(f"目标不是普通文件：{path}")
 
             # 授权后再次检查路径，防止授权期间路径指向发生变化。
             verified = self._resolve_path(path)
             if verified != target or verified.is_symlink() or not verified.is_file():
-                return f"错误：目标路径状态发生变化，已拒绝删除：{path}"
+                return ToolResult.failure(f"目标路径状态发生变化，已拒绝删除：{path}")
 
             verified.unlink()
-            return f"删除文件成功：{path}"
+            return ToolResult.success(f"删除文件成功：{path}")
 
         except (ValueError, OSError) as exc:
-            return f"错误：删除文件失败：{exc}"
+            return ToolResult.failure(f"删除文件失败：{exc}")
 
 
     def describe_directory_deletion(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -677,69 +677,74 @@ class WorkspaceTools:
         }
 
 
-    def delete_directory(self, path: str) -> str:
+    def delete_directory(self, path: str) -> ToolResult:
         """删除目录内容并移除空目录；授权由工具注册表在调用前统一完成。"""
         try:
             target = self._resolve_path(path)
 
             if not target.exists():
-                return f"错误：目录不存在：{path}"
+                return ToolResult.failure(f"目录不存在：{path}")
 
             if target.is_symlink():
-                return f"错误：不允许删除符号链接：{path}"
+                return ToolResult.failure(f"不允许删除符号链接：{path}")
 
             if not target.is_dir():
-                return f"错误：目标不是目录：{path}"
+                return ToolResult.failure(f"目标不是目录：{path}")
 
             if target == self.workspace.root:
-                return "错误：不允许删除整个工作区根目录。"
+                return ToolResult.failure("不允许删除整个工作区根目录。")
 
-            results = []
+            results: list[str] = []
+            failed = False
 
             # 先取得当前目录项快照，按名称排序，方便测试和阅读输出。
             try:
                 children = sorted(target.iterdir(), key=lambda item: item.name)
             except OSError as exc:
-                return f"错误：无法读取目录：{exc}"
+                return ToolResult.failure(f"无法读取目录：{exc}")
 
             for child in children:
                 relative_path = child.relative_to(self.workspace.root).as_posix()
 
                 # 不跟随符号链接，避免越界访问或删除链接目标。
                 if child.is_symlink():
-                    results.append(
-                        f"跳过符号链接：{relative_path}"
-                    )
+                    results.append(f"跳过符号链接：{relative_path}")
                     continue
 
                 if child.is_dir():
                     # 递归调用同一删除逻辑，子目录在清空后一并移除。
-                    result = self.delete_directory(relative_path)
-                    results.append(result)
+                    outcome = self.delete_directory(relative_path)
                 elif child.is_file():
-                    result = self.delete_file(relative_path)
-                    results.append(result)
+                    outcome = self.delete_file(relative_path)
                 else:
-                    results.append(
-                        f"跳过不支持的文件类型：{relative_path}"
-                    )
+                    results.append(f"跳过不支持的文件类型：{relative_path}")
+                    continue
+
+                results.append(outcome.result or outcome.error or "")
+                if outcome.status is not ToolStatus.SUCCESS:
+                    failed = True
 
             # 授权已在注册表层完成；不使用 shutil.rmtree，仅删除空目录。
             verified = self._resolve_path(path)
 
             if verified != target or verified.is_symlink() or not verified.is_dir():
-                results.append(f"错误：目录状态发生变化，已拒绝删除：{path}")
-                return "\n".join(results)
+                return ToolResult.failure(
+                    "\n".join([*results, f"目录状态发生变化，已拒绝删除：{path}"])
+                )
 
             try:
                 verified.rmdir()
                 results.append(f"删除目录成功：{path}")
             except OSError as exc:
+                failed = True
                 results.append(
                     f"无法删除目录 {path}：目录可能仍有未删除的内容。详情：{exc}"
                 )
 
-            return "\n".join(results)
+            joined = "\n".join(results)
+            if failed:
+                return ToolResult.failure(joined)
+            return ToolResult.success(joined)
 
         except (ValueError, OSError) as exc:
-            return f"错误：删除目录失败：{exc}"
+            return ToolResult.failure(f"删除目录失败：{exc}")

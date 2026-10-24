@@ -54,7 +54,12 @@ def _registry(tmp_path, authorizer):
     registry.register(ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, failing_edit))
     for tool_name in ("read_file", "create_file", "run_tests"):
         registry.register(
-            ToolSpec(tool_name, f"执行 {tool_name}", EMPTY_PARAMETERS, lambda: "完成")
+            ToolSpec(
+                tool_name,
+                f"执行 {tool_name}",
+                EMPTY_PARAMETERS,
+                lambda: ToolResult.success("完成"),
+            )
         )
     return registry
 
@@ -174,7 +179,7 @@ def test_agent_repairs_code_import_error_and_reruns_tests(
         nonlocal edits
         edits += 1
         target.write_text("VALUE = 1\n", encoding="utf-8")
-        return "修改成功"
+        return ToolResult.success("修改成功")
 
     registry.register(
         ToolSpec(
@@ -266,7 +271,7 @@ def test_agent_stops_after_rollback_when_test_repair_budget_is_exhausted(
         nonlocal edit_count
         edit_count += 1
         target.write_text(f"repair-{edit_count}", encoding="utf-8")
-        return "修改成功"
+        return ToolResult.success("修改成功")
 
     registry.register(
         ToolSpec(
@@ -340,12 +345,12 @@ def test_simple_task_can_create_recovery_plan_after_test_failure(
                 f"测试目标：{test_path}\n测试退出码：1\n"
                 "测试结果：失败\n测试错误类型：断言失败"
             )
-        return f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过"
+        return ToolResult.success(f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过")
 
     def edit_file(path):
         """模拟简单任务测试失败后的实际修复。"""
         target.write_text("fixed", encoding="utf-8")
-        return "修改成功"
+        return ToolResult.success("修改成功")
 
     registry.register(
         ToolSpec(
@@ -414,18 +419,18 @@ def test_agent_forces_test_rerun_after_repair_before_accepting_summary(
                 f"测试目标：{test_path}\n测试退出码：1\n"
                 "测试结果：失败\n测试错误类型：断言失败"
             )
-        return f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过"
+        return ToolResult.success(f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过")
 
     def edit_file(path):
         """模拟测试失败后对业务实现进行一次真实修改。"""
         target.write_text("fixed", encoding="utf-8")
-        return "修改成功"
+        return ToolResult.success("修改成功")
 
     def read_file(path):
         """记录本应被恢复门控暂缓的读取调用。"""
         nonlocal deferred_reads
         deferred_reads += 1
-        return target.read_text(encoding="utf-8")
+        return ToolResult.success(target.read_text(encoding="utf-8"))
 
     registry.register(
         ToolSpec(

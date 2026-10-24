@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from app.core.agent import Agent
 from app.runtime.workspace import WorkspaceContext
 from app.tools.registry import ToolRegistry, ToolSpec
+from app.tools.result import ToolResult
 
 PARAMETERS = {
     "type": "object",
@@ -29,7 +30,7 @@ def test_trace_records_planning_state_and_completion_events(monkeypatch, tmp_pat
                 name=tool_name,
                 description=f"执行 {tool_name}",
                 parameters=PARAMETERS,
-                executor=lambda: "步骤完成",
+                executor=lambda: ToolResult.success("步骤完成"),
             )
         )
 
@@ -109,8 +110,8 @@ def test_trace_records_git_snapshot_changes_without_continue_noise(
                 "required": ["path", "content"],
                 "additionalProperties": False,
             },
-            executor=lambda path, content: _create_file(
-                tmp_path, path, content
+            executor=lambda path, content: ToolResult.success(
+                _create_file(tmp_path, path, content)
             ),
         )
     )

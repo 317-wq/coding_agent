@@ -5,7 +5,7 @@ from app.tools.authorization import (
     ConsoleAuthorizer,
 )
 from app.tools.registry import RiskLevel, ToolRegistry, ToolSpec
-from app.tools.result import ToolStatus
+from app.tools.result import ToolResult, ToolStatus
 
 
 class StubAuthorizer:
@@ -52,7 +52,9 @@ def test_denied_high_risk_tool_is_cancelled_without_execution(tmp_path: Path):
 def test_approved_high_risk_tool_executes():
     authorizer = StubAuthorizer(AuthorizationDecision.allow())
     registry = ToolRegistry(authorizer=authorizer)
-    registry.register(make_delete_spec(lambda path: f"deleted:{path}"))
+    registry.register(
+        make_delete_spec(lambda path: ToolResult.success(f"deleted:{path}"))
+    )
 
     result = registry.execute("delete_file", {"path": "demo.txt"})
 
@@ -73,7 +75,7 @@ def test_low_risk_tool_does_not_request_authorization():
                 "properties": {},
                 "additionalProperties": False,
             },
-            executor=lambda: "content",
+            executor=lambda: ToolResult.success("content"),
             risk_level=RiskLevel.LOW,
         )
     )

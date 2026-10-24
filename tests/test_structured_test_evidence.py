@@ -164,7 +164,12 @@ def test_agent_keeps_structured_result_in_context_and_trace(monkeypatch, tmp_pat
     registry = ToolRegistry()
     for tool_name in ("read_file", "create_file"):
         registry.register(
-            ToolSpec(tool_name, f"执行 {tool_name}", EMPTY_PARAMETERS, lambda: "ok")
+            ToolSpec(
+                tool_name,
+                f"执行 {tool_name}",
+                EMPTY_PARAMETERS,
+                lambda: ToolResult.success("ok"),
+            )
         )
 
     def run_tests_stub() -> ToolResult:

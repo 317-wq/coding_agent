@@ -6,10 +6,14 @@ from app.tools.registry import ToolRegistry, ToolSpec
 from app.tools.result import ToolStatus
 
 
+def _text(result) -> str:
+    """取出工具结果中面向人的文本。"""
+    return result.result or result.error or ""
+
+
 def _run(toolbox: tools.WorkspaceTools, test_path: str) -> str:
     """执行测试工具并取出面向人的文本，保持原有断言口径。"""
-    result = toolbox.run_tests(test_path)
-    return getattr(result, "result", None) or getattr(result, "error", None) or str(result)
+    return _text(toolbox.run_tests(test_path))
 
 
 def test_run_tests_failure_becomes_structured_failure(tmp_path: Path):
@@ -101,7 +105,7 @@ def test_list_files_accepts_workspace_absolute_path(tmp_path: Path):
     toolbox = tools.WorkspaceTools(WorkspaceContext.from_path(tmp_path))
     (tmp_path / "calculator.py").write_text("VALUE = 1\n", encoding="utf-8")
 
-    result = toolbox.list_files(str(tmp_path))
+    result = _text(toolbox.list_files(str(tmp_path)))
 
     assert "calculator.py" in result
     assert not result.startswith("错误：")
@@ -115,7 +119,7 @@ def test_list_and_run_tests_preserve_exact_python_filename(tmp_path: Path):
     target = tests / "test_completion_probe.py"
     target.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
 
-    listing = toolbox.list_files("tests")
+    listing = _text(toolbox.list_files("tests"))
     result = _run(toolbox, str(target))
 
     assert "文件: tests/test_completion_probe.py" in listing
@@ -144,11 +148,11 @@ def test_edit_file_is_idempotent_when_target_content_already_exists(tmp_path: Pa
     target = tmp_path / "completion_probe.py"
     target.write_text("def probe():\n    return 42\n", encoding="utf-8")
 
-    first = toolbox.edit_file(
-        "completion_probe.py", "    return 42", "    return 43"
+    first = _text(
+        toolbox.edit_file("completion_probe.py", "    return 42", "    return 43")
     )
-    second = toolbox.edit_file(
-        "completion_probe.py", "    return 42", "    return 43"
+    second = _text(
+        toolbox.edit_file("completion_probe.py", "    return 42", "    return 43")
     )
 
     assert "修改文件成功" in first
@@ -160,7 +164,7 @@ def test_create_file_reports_verified_disk_content(tmp_path: Path):
     """验证创建工具只有在磁盘内容与请求一致时才报告已核验成功。"""
     toolbox = tools.WorkspaceTools(WorkspaceContext.from_path(tmp_path))
 
-    result = toolbox.create_file("module.py", "VALUE = 1\n")
+    result = _text(toolbox.create_file("module.py", "VALUE = 1\n"))
 
     assert result == "创建文件成功并已核验：module.py"
     assert (tmp_path / "module.py").read_text(encoding="utf-8") == "VALUE = 1\n"

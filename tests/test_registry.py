@@ -2,8 +2,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from app.core.agent import Agent
 from app.runtime.workspace import WorkspaceContext
 from app.tools import git_tools, tools
@@ -16,7 +14,7 @@ from app.tools.registry import (
 from app.tools.result import ToolResult, ToolStatus
 
 
-def make_spec(name="echo", executor=lambda value: value):
+def make_spec(name="echo", executor=lambda value: ToolResult.success(value)):
     return ToolSpec(
         name=name,
         description="返回输入内容。",
@@ -64,19 +62,15 @@ def test_registry_returns_error_for_unknown_tool():
     assert result.error == "不支持的工具：missing"
 
 
-@pytest.mark.parametrize(
-    ("output", "status"),
-    [
-        ("完成", ToolStatus.SUCCESS),
-        ("错误：失败", ToolStatus.FAILURE),
-        ("已取消删除：demo.txt", ToolStatus.CANCELLED),
-    ],
-)
-def test_registry_normalizes_legacy_tool_output(output, status):
+def test_registry_rejects_non_tool_result_output():
+    """验证执行器返回字符串时被判为契约违约，而不是猜测状态。"""
     registry = ToolRegistry()
-    registry.register(make_spec(executor=lambda value: output))
+    registry.register(make_spec(executor=lambda value: value))
 
-    assert registry.execute("echo", {"value": "x"}).status is status
+    result = registry.execute("echo", {"value": "x"})
+
+    assert result.status is ToolStatus.FAILURE
+    assert "必须返回 ToolResult" in (result.error or "")
 
 
 def test_default_registry_contains_every_builtin_tool():

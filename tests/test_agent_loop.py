@@ -6,6 +6,7 @@ from app.core.agent import Agent
 from app.runtime.model import ModelAdapter, ModelFallbackExhaustedError
 from app.runtime.workspace import WorkspaceContext
 from app.tools.registry import ToolRegistry, ToolSpec
+from app.tools.result import ToolResult
 
 PARAMETERS = {
     "type": "object",
@@ -39,7 +40,7 @@ def test_complex_task_uses_plan_and_verifies_before_finishing(monkeypatch, tmp_p
                 name=tool_name,
                 description=f"执行 {tool_name}",
                 parameters=PARAMETERS,
-                executor=lambda: "步骤完成",
+                executor=lambda: ToolResult.success("步骤完成"),
             )
         )
 

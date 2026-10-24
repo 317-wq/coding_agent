@@ -16,11 +16,19 @@ EMPTY_PARAMETERS = {
 
 
 def make_spec(name, executor):
+    """注册工具规格；测试桩返回字符串时自动包装为成功结果。"""
+
+    def normalized(*args, **kwargs):
+        output = executor(*args, **kwargs)
+        if isinstance(output, ToolResult):
+            return output
+        return ToolResult.success(output)
+
     return ToolSpec(
         name=name,
         description=f"执行 {name}。",
         parameters=EMPTY_PARAMETERS,
-        executor=executor,
+        executor=normalized,
     )
 
 
@@ -46,7 +54,7 @@ def test_agent_returns_failure_json_and_stops_current_tool_batch(
 
     def should_not_run():
         executions.append("second")
-        return "unexpected"
+        return ToolResult.success("unexpected")
 
     registry.register(make_spec("fail", fail))
     registry.register(make_spec("second", should_not_run))
@@ -102,12 +110,12 @@ def test_replanned_task_can_complete_after_earlier_tool_failure(
         """模拟错误路径失败、正确路径成功的读取工具。"""
         if path != "module.py":
             return ToolResult.failure(f"文件不存在：{path}")
-        return target.read_text(encoding="utf-8")
+        return ToolResult.success(target.read_text(encoding="utf-8"))
 
     def edit_file(path):
         """模拟恢复计划中的真实文件修改。"""
         target.write_text("after", encoding="utf-8")
-        return "修改成功"
+        return ToolResult.success("修改成功")
 
     registry.register(ToolSpec("read_file", "读取文件", path_parameters, read_file))
     registry.register(ToolSpec("edit_file", "修改文件", path_parameters, edit_file))
@@ -121,7 +129,7 @@ def test_replanned_task_can_complete_after_earlier_tool_failure(
                 "additionalProperties": False,
             },
             lambda test_path=".": (
-                f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过"
+                ToolResult.success(f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过")
             ),
         )
     )
@@ -185,7 +193,7 @@ def test_test_replan_preserves_completed_read_and_implementation_steps(
         """依次完成初始实现和测试失败后的修复。"""
         current = target.read_text(encoding="utf-8")
         target.write_text(f"{current}-fixed", encoding="utf-8")
-        return "修改成功"
+        return ToolResult.success("修改成功")
 
     def run_tests(test_path="."):
         """首次返回断言失败，修复后返回通过。"""
@@ -196,14 +204,14 @@ def test_test_replan_preserves_completed_read_and_implementation_steps(
                 f"测试目标：{test_path}\n测试退出码：1\n"
                 "测试结果：失败\n测试错误类型：断言失败"
             )
-        return f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过"
+        return ToolResult.success(f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过")
 
     registry.register(
         ToolSpec(
             "read_file",
             "读取文件",
             path_parameters,
-            lambda path: target.read_text(encoding="utf-8"),
+            lambda path: ToolResult.success(target.read_text(encoding="utf-8")),
         )
     )
     registry.register(ToolSpec("edit_file", "修改文件", path_parameters, edit_file))
@@ -266,7 +274,7 @@ def test_failed_test_advances_phase_before_test_only_repair(
         """分别写入业务实现和测试修复。"""
         target = tmp_path / path
         target.write_text("fixed", encoding="utf-8")
-        return "修改成功"
+        return ToolResult.success("修改成功")
 
     def run_tests(test_path="."):
         """首次模拟测试代码错误，测试文件修复后通过。"""
@@ -277,7 +285,7 @@ def test_failed_test_advances_phase_before_test_only_repair(
                 f"测试目标：{test_path}\n测试退出码：1\n"
                 "测试结果：失败\n测试错误类型：测试代码错误"
             )
-        return f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过"
+        return ToolResult.success(f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过")
 
     registry.register(
         ToolSpec(
@@ -462,7 +470,7 @@ def test_failed_edit_does_not_reuse_prior_net_change_as_new_mutation(
         if content == "fail":
             return ToolResult.failure("模拟未落盘失败")
         target.write_text(content, encoding="utf-8")
-        return "修改成功"
+        return ToolResult.success("修改成功")
 
     registry.register(
         ToolSpec(
@@ -604,7 +612,7 @@ def test_agent_skips_identical_successful_edit(monkeypatch, tmp_path: Path):
         executions.append(path)
         content = target.read_text(encoding="utf-8")
         target.write_text(content.replace(old_text, new_text), encoding="utf-8")
-        return "修改成功"
+        return ToolResult.success("修改成功")
 
     registry.register(
         ToolSpec(
@@ -662,7 +670,7 @@ def test_agent_redirects_second_create_of_task_file_to_edit(
 
     def create_file(path, content):
         (tmp_path / path).write_text(content, encoding="utf-8")
-        return "创建成功"
+        return ToolResult.success("创建成功")
 
     registry.register(
         ToolSpec(
@@ -797,7 +805,7 @@ def test_agent_completes_when_final_allowed_round_finishes_plan(
                 "properties": {"path": {"type": "string"}},
                 "additionalProperties": False,
             },
-            lambda path=".": "目录为空",
+            lambda path=".": ToolResult.success("目录为空"),
         )
     )
     registry.register(
@@ -810,7 +818,7 @@ def test_agent_completes_when_final_allowed_round_finishes_plan(
                 "additionalProperties": False,
             },
             lambda test_path=".": (
-                f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过\n1 passed"
+                ToolResult.success(f"测试目标：{test_path}\n测试退出码：0\n测试结果：通过\n1 passed")
             ),
         )
     )
@@ -858,7 +866,7 @@ def test_final_report_uses_disk_and_trace_instead_of_model_claims(
     def create_file(path, content):
         """在测试工作区实际创建文件。"""
         (tmp_path / path).write_text(content, encoding="utf-8")
-        return "创建成功"
+        return ToolResult.success("创建成功")
 
     registry.register(
         ToolSpec(

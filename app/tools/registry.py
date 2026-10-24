@@ -13,7 +13,7 @@ from app.tools.git_tools import GitReadTools
 from app.tools.result import ToolResult
 from app.tools.validation import ToolArgumentValidationError, validate_tool_arguments
 
-ToolExecutor = Callable[..., str | ToolResult]
+ToolExecutor = Callable[..., ToolResult]
 AuthorizationDescriber = Callable[[dict[str, Any]], dict[str, Any]]
 """高风险工具的可选说明生成器：把执行参数扩展为授权时展示的清单。"""
 
@@ -148,7 +148,11 @@ class ToolRegistry:
         except Exception as exc:  # noqa: BLE001 - 注册表是工具异常边界
             return ToolResult.failure(f"工具执行异常：{exc}")
 
-        return self._normalize_output(output)
+        if not isinstance(output, ToolResult):
+            return ToolResult.failure(
+                f"工具 {spec.name} 返回了不支持的结果类型，执行器必须返回 ToolResult。"
+            )
+        return output
 
     @staticmethod
     def _record_authorization(
@@ -169,21 +173,6 @@ class ToolRegistry:
             reason=reason,
             arguments=arguments,
         )
-
-    @staticmethod
-    def _normalize_output(output: str | ToolResult) -> ToolResult:
-        if isinstance(output, ToolResult):
-            return output
-        if not isinstance(output, str):
-            return ToolResult.failure("工具返回了不支持的结果类型。")
-        if output.startswith("错误："):
-            return ToolResult.failure(output.removeprefix("错误："))
-        if any(line.startswith("已取消") for line in output.splitlines()):
-            return ToolResult.cancelled(output)
-        if any(line.startswith("无法删除目录") for line in output.splitlines()):
-            return ToolResult.failure(output)
-        return ToolResult.success(output)
-
 
 TOOL_RISK_LEVELS = {
     "delete_directory": RiskLevel.HIGH,
