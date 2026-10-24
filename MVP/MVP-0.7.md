@@ -67,6 +67,7 @@
 - 已同步至 PROJECT.md v1.40：模型配置改为 provider 列表与惰性加载，旧 `QWEN_*` 映射为单个 provider，超限序号启动即报错（对应 R1）。
 - 已同步至 PROJECT.md v1.41：测试结果改为结构化对象，判定与报告不再解析文本，协议解析仅保留在测试证据模块（对应 R2）。
 - 已同步至 PROJECT.md v1.42：授权收敛到注册表单一入口，删除前提供文件清单、授权决定进 Trace，风险等级只保留 LOW/HIGH（对应 R3）。
+- 已同步至 PROJECT.md v1.43：工具层改为按工作区绑定的实例方法，移除全局工作区、旧分发入口与兼容懒导出（对应 R4）。
 
 ## 4. 本版要实现的模块功能
 
@@ -114,7 +115,7 @@
     4. 非交互策略显式化：无 TTY 时 HIGH 操作默认拒绝，并在工具结果中说明原因。
   - 完成条件：删除单个文件只触发一次确认；非交互场景有明确结果与说明；授权决定记录进 Trace；相关测试更新并全绿。
 
-- [ ] **R4 · 工作区上下文注入**
+- [x] **R4 · 工作区上下文注入**
 
   - 现象：`app/tools/tools.py` 的 `WORKSPACE` / `WORKSPACE_CONTEXT` 是模块级可变全局，靠 `set_workspace()` 修改；`app/tools/__init__.py` 用 `globals()[...]` 手工同步；`_resolve_path()` 读取全局。
   - 根因：工具函数是无状态模块函数，工作区只能保存在模块全局。
@@ -143,7 +144,7 @@
 - [x] **R1**：删除 `.env` 后 `python -c "import app"` 与 `uv run pytest` 均可用；`MODEL_PROVIDER_1_*` 配置生效且旧 `QWEN_*` 仍可用。
 - [x] **R2**：`grep -rn '测试退出码：' app/` 只剩 `test_evidence` 与 `tools`（生成端），判定端不再解析文本。
 - [x] **R3**：交互式删除单个文件只出现一次 `y` 确认；非交互删除返回明确说明；`RiskLevel.MEDIUM` 要么有行为、要么被删除。
-- [ ] **R4**：`grep -rn 'WORKSPACE_CONTEXT\|set_workspace\|execute_tool' app/` 无结果；新增并行工作区用例通过。
+- [x] **R4**：`grep -rn 'WORKSPACE_CONTEXT\|set_workspace\|execute_tool' app/` 无结果；新增并行工作区用例通过。
 - [ ] **R5**：`grep -n '_run_legacy' app/` 无结果；`wc -l app/core/agent.py` 明显下降；golden 用例全绿。
 - [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框与基线版本只在验收通过后更新。
 
