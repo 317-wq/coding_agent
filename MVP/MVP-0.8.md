@@ -55,6 +55,7 @@
 ### 基线同步约定
 
 每项验收通过后 `PROJECT.md` 升版（从 v1.45 起），并在本节追加“已同步至 PROJECT.md vX.Y”。
+- H1 仅调整仓库约定（行尾、忽略规则、遗留文件），不改变架构、选型或接口，因此不升 `PROJECT.md` 版本。
 
 ## 4. 本版要实现的模块功能
 
@@ -66,9 +67,9 @@
 
 ---
 
-- [ ] **H1 · 仓库卫生**
+- [x] **H1 · 仓库卫生**
 
-  - 现象：`PROJECT.md` 是仓库里唯一的 CRLF 文件，其余为 LF；`tests/test_workspace_arg.py.orig` 这类备份文件仍留在工作区；`MVP/`、`diagram/` 被忽略导致新文档必须 `git add -f`，漏加就会静默丢失（`tests/` 此前因此丢了 13 个文件）。
+  - 现象：`PROJECT.md` 与 `AGENTS.md` 是仓库里的 CRLF 文件，其余为 LF；`tests/test_workspace_arg.py.orig` 这类备份文件仍留在工作区；`MVP/`、`diagram/` 被忽略导致新文档必须 `git add -f`，漏加就会静默丢失（`tests/` 此前因此丢了 13 个文件）。
   - 根因：缺少 `.gitattributes` 约束；忽略规则与“文档/测试需要入库”的实际用法冲突。
   - 改动：
     1. 新增 `.gitattributes`：`* text=auto eol=lf`，并把 `PROJECT.md` 一次性规范为 LF。
@@ -102,7 +103,7 @@
 
 - [ ] **通用门槛**：每项完成后 `uv run pytest -q` 全绿、`uv run ruff check app tests` 输出 `All checks passed!`。
 - [ ] **行为等价**：`uv run pytest tests/test_runner_golden.py -q` 始终 6 passed，快照文件不得修改。
-- [ ] **H1**：`git status --short --untracked-files=all` 无输出；`file MVP/PROJECT.md` 不含 CRLF；`git check-ignore MVP/MVP-0.8.md` 返回非零。
+- [x] **H1**：`git status --short --untracked-files=all` 无输出；`file MVP/PROJECT.md` 不含 CRLF；`git check-ignore MVP/MVP-0.8.md` 返回非零。
 - [ ] **H2**：`grep -rn '_normalize_output' app/` 无结果；新增用例断言“返回字符串的执行器被判为失败”。
 - [ ] **H3**：`awk` 统计 `_execute_tool_batch` 行数 ≤ 150；四个辅助方法各有独立 docstring。
 - [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框与基线版本只在验收通过后更新。
