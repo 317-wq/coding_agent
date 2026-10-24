@@ -66,6 +66,7 @@
 每项验收通过后 `PROJECT.md` 升版（从 v1.40 起），并在本节追加“已同步至 PROJECT.md vX.Y”。
 - 已同步至 PROJECT.md v1.40：模型配置改为 provider 列表与惰性加载，旧 `QWEN_*` 映射为单个 provider，超限序号启动即报错（对应 R1）。
 - 已同步至 PROJECT.md v1.41：测试结果改为结构化对象，判定与报告不再解析文本，协议解析仅保留在测试证据模块（对应 R2）。
+- 已同步至 PROJECT.md v1.42：授权收敛到注册表单一入口，删除前提供文件清单、授权决定进 Trace，风险等级只保留 LOW/HIGH（对应 R3）。
 
 ## 4. 本版要实现的模块功能
 
@@ -102,7 +103,7 @@
     5. `registry._normalize_output` 不再嗅探中文前缀判断状态。
   - 完成条件：测试状态判定不再对原始输出做正则；文本协议解析点从 5 处降到 1 处；全量测试通过并新增结构化用例。
 
-- [ ] **R3 · 授权入口收敛**
+- [x] **R3 · 授权入口收敛**
 
   - 现象：删除一个文件要按两次 `y`（`registry` 的 HIGH 授权加 `tools._confirm_delete`）；非交互模式下两个授权器都默认拒绝，删除工具永远不可能成功；`RiskLevel.MEDIUM` 没有任何行为分支。
   - 根因：授权在两处实现，工具内部自建确认；风险等级只对 HIGH 定义了行为。
@@ -141,7 +142,7 @@
 - [ ] **行为等价性**（R5 前置）：先新增 golden 用例，以固定 FakeModel 复现 6 个场景（正常完成、测试失败后修复、授权回滚、拒绝回滚、变更集异常、重规划上限），断言 `TaskResult.to_dict()` 全字段一致；该项必须在 R5 动手前完成。
 - [x] **R1**：删除 `.env` 后 `python -c "import app"` 与 `uv run pytest` 均可用；`MODEL_PROVIDER_1_*` 配置生效且旧 `QWEN_*` 仍可用。
 - [x] **R2**：`grep -rn '测试退出码：' app/` 只剩 `test_evidence` 与 `tools`（生成端），判定端不再解析文本。
-- [ ] **R3**：交互式删除单个文件只出现一次 `y` 确认；非交互删除返回明确说明；`RiskLevel.MEDIUM` 要么有行为、要么被删除。
+- [x] **R3**：交互式删除单个文件只出现一次 `y` 确认；非交互删除返回明确说明；`RiskLevel.MEDIUM` 要么有行为、要么被删除。
 - [ ] **R4**：`grep -rn 'WORKSPACE_CONTEXT\|set_workspace\|execute_tool' app/` 无结果；新增并行工作区用例通过。
 - [ ] **R5**：`grep -n '_run_legacy' app/` 无结果；`wc -l app/core/agent.py` 明显下降；golden 用例全绿。
 - [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框与基线版本只在验收通过后更新。
