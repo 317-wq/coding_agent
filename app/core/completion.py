@@ -19,6 +19,7 @@ from app.core.test_evidence import (
     summarize_test_evidence,
 )
 from app.tools.result import ToolResult, ToolStatus
+from app.tools.test_result import TestRunResult
 
 
 class CompletionStatus(StrEnum):
@@ -62,13 +63,14 @@ class CompletionVerifier:
 
     @classmethod
     def _structured_test_evidence(
-        cls, test_results: Sequence[str]
+        cls, test_results: Sequence[TestRunResult | str]
     ) -> tuple[TestEvidence, ...]:
         """只保留结构化测试结果，并按目标折叠为最新证据。"""
         structured = tuple(
             result
             for result in test_results
-            if isinstance(result, str) and has_structured_test_output(result)
+            if isinstance(result, TestRunResult)
+            or (isinstance(result, str) and has_structured_test_output(result))
         )
         if not structured:
             return ()
@@ -85,7 +87,7 @@ class CompletionVerifier:
         self,
         plan: TaskPlan,
         tool_results: Sequence[ToolResult] = (),
-        test_results: Sequence[str] = (),
+        test_results: Sequence[TestRunResult | str] = (),
     ) -> CompletionDecision:
         """根据计划状态、工具结果和结构化测试证据严格判定复杂任务。"""
         if not isinstance(plan, TaskPlan):
@@ -174,7 +176,7 @@ class CompletionVerifier:
     def verify_basic(
         self,
         tool_results: Sequence[ToolResult] = (),
-        test_results: Sequence[str] = (),
+        test_results: Sequence[TestRunResult | str] = (),
     ) -> CompletionDecision:
         """验证简单任务也具备结构化执行证据。"""
 
@@ -227,7 +229,7 @@ class CompletionVerifier:
 def verify_completion(
     plan: TaskPlan,
     tool_results: Sequence[ToolResult] = (),
-    test_results: Sequence[str] = (),
+    test_results: Sequence[TestRunResult | str] = (),
 ) -> CompletionDecision:
     """使用默认验证器执行完成判定。"""
 
