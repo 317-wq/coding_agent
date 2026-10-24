@@ -259,7 +259,6 @@ class Agent:
             )
 
         tool_call_count = 0
-        rollback_denied = False
 
         for step in range(1, self.max_steps + 1):
             self._debug_print(f"\n[Agent] 第 {step}/{self.max_steps} 轮")
@@ -504,17 +503,6 @@ class Agent:
                                 recoverable_paths=recovery.recoverable_paths,
                             )
                         if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
-                            if rollback_denied:
-                                reason = (
-                                    "用户拒绝回滚，当前修改已保留；"
-                                    "请确认是否继续执行后续修复。"
-                                )
-                                trace.record(
-                                    "user_confirmation_required",
-                                    reason=reason,
-                                    completion_check_id=completion_check_id,
-                                )
-                                return reason
                             trace.record(
                                 "rollback_authorization_requested",
                                 recovery_id=f"recovery-{completion_check_id}",
@@ -537,7 +525,6 @@ class Agent:
                             if rollback.status is not RollbackStatus.RESTORED:
                                 reason = f"恢复未完成：{rollback.reason}"
                                 if rollback.status is RollbackStatus.CANCELLED:
-                                    rollback_denied = True
                                     reason = (
                                         "用户拒绝回滚，当前修改已保留；"
                                         "请确认是否继续执行后续修复。"
@@ -1133,17 +1120,6 @@ class Agent:
                 )
 
                 if recovery.action is RecoveryAction.SUGGEST_ROLLBACK:
-                    if rollback_denied:
-                        reason = (
-                            "用户拒绝回滚，当前修改已保留；请确认是否继续执行后续修复。"
-                        )
-                        trace.record(
-                            "user_confirmation_required",
-                            reason=reason,
-                            recovery_id=recovery_id,
-                            tool_call_id=tool_call.id,
-                        )
-                        return reason
                     trace.record(
                         "rollback_authorization_requested",
                         recovery_id=recovery_id,
@@ -1166,7 +1142,6 @@ class Agent:
                     if rollback.status is not RollbackStatus.RESTORED:
                         reason = f"恢复未完成：{rollback.reason}"
                         if rollback.status is RollbackStatus.CANCELLED:
-                            rollback_denied = True
                             reason = (
                                 "用户拒绝回滚，当前修改已保留；"
                                 "请确认是否继续执行后续修复。"
