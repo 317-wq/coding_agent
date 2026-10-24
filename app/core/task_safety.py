@@ -44,6 +44,7 @@ class TaskSafetySession:
         self.change_set = TaskChangeSet(workspace)
         self.consecutive_tool_failures = 0
         self.recovery_attempts = 0
+        self.replan_attempts = 0
         self.test_repair_attempts = 0
         self.test_runs = 0
         self.mutation_generation = 0
@@ -269,6 +270,11 @@ class TaskSafetySession:
                             paths.append(relative)
         return tuple(paths)
 
+    def note_replan(self) -> int:
+        """记录一次实际应用的重规划，并返回累计次数。"""
+        self.replan_attempts += 1
+        return self.replan_attempts
+
     def observe(
         self,
         tool_name: str,
@@ -353,6 +359,7 @@ class TaskSafetySession:
                 plan_failed=plan_failed,
                 recoverable_paths=recoverable_paths,
                 recovery_attempts=self.recovery_attempts,
+                replan_attempts=self.replan_attempts,
             )
         )
 
@@ -386,6 +393,7 @@ class TaskSafetySession:
                 completion_status=status,
                 recoverable_paths=tuple(change.path for change in summary.changes),
                 recovery_attempts=self.recovery_attempts,
+                replan_attempts=self.replan_attempts,
             )
         )
 
@@ -395,6 +403,7 @@ class TaskSafetySession:
             raise ValueError("只有确认回滚成功后才能重置任务变更会话。")
         self.recovery_attempts += 1
         self.consecutive_tool_failures = 0
+        self.replan_attempts = 0
         self.test_repair_attempts = 0
         self.test_runs = 0
         self.mutation_generation = 0
