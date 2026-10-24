@@ -11,6 +11,12 @@ from app.core.complexity import (
     TaskComplexity,
     judge_task_complexity,
 )
+from app.core.intent import (
+    EvidenceKind,
+    TaskIntent,
+    extract_intent,
+)
+from app.core.plan_lint import FILE_KINDS, lint_objectives, phase_of
 from app.runtime.explorer import ProjectSnapshot
 
 
@@ -32,6 +38,7 @@ class PlanStep:
     objective: str
     completion_criteria: str
     status: PlanStepStatus = PlanStepStatus.PENDING
+    acceptance_ids: tuple[int, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +46,7 @@ class PlanStep:
             "objective": self.objective,
             "completion_criteria": self.completion_criteria,
             "status": self.status.value,
+            "acceptance_ids": list(self.acceptance_ids),
         }
 
 
@@ -50,12 +58,16 @@ class TaskPlan:
     complexity: TaskComplexity
     steps: tuple[PlanStep, ...]
     reasons: tuple[str, ...]
+    intent: TaskIntent | None = None
+    lint_issues: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "task": self.task,
             "complexity": self.complexity.value,
             "reasons": list(self.reasons),
+            "intent": self.intent.to_dict() if self.intent is not None else None,
+            "lint_issues": list(self.lint_issues),
             "steps": [step.to_dict() for step in self.steps],
         }
 
@@ -77,12 +89,24 @@ class TaskPlanner:
 
         normalized = task.strip()
         decision = decision or judge_task_complexity(normalized, snapshot)
+        intent = extract_intent(normalized)
         objectives = self._extract_objectives(normalized, decision.complexity)
+        lint_issues: tuple[str, ...] = ()
+
+        if decision.complexity is TaskComplexity.COMPLEX:
+            raw = [self._strip_prefix(objective) for objective in objectives]
+            result = lint_objectives(raw, intent)
+            objectives = [f"完成：{objective}" for objective in result.objectives]
+            lint_issues = tuple(
+                f"{issue.rule}: {issue.detail}" for issue in result.issues
+            )
+
         steps = tuple(
             PlanStep(
                 step_id=index,
                 objective=objective,
                 completion_criteria=self._criteria_for(objective),
+                acceptance_ids=self._bind_acceptance(objective, intent),
             )
             for index, objective in enumerate(objectives, start=1)
         )
@@ -90,8 +114,10 @@ class TaskPlanner:
         return TaskPlan(
             task=normalized,
             complexity=decision.complexity,
-            steps=steps,
+            steps=self._attach_unbound_acceptance(steps, intent),
             reasons=decision.reasons,
+            intent=intent,
+            lint_issues=lint_issues,
         )
 
     @staticmethod
@@ -160,6 +186,71 @@ class TaskPlanner:
         return [f"完成：{part}" for part in parts]
 
     @staticmethod
+    def _strip_prefix(objective: str) -> str:
+        """去掉步骤目标的前缀，便于校验与绑定。"""
+        for prefix in ("完成用户任务：", "完成："):
+            if objective.startswith(prefix):
+                return objective.removeprefix(prefix)
+        return objective
+
+    @staticmethod
+    def _bind_acceptance(objective: str, intent: TaskIntent) -> tuple[int, ...]:
+        """把验收项按阶段绑定到步骤，便于追踪。"""
+        phase = phase_of(objective)
+        ids: list[int] = []
+        for item in intent.acceptance:
+            matches = (
+                (phase, item.kind)
+                in {
+                    ("read", EvidenceKind.WORKSPACE_READ),
+                    ("test_run", EvidenceKind.TEST_PASSED),
+                }
+                or (
+                    phase == "test_author"
+                    and item.kind is EvidenceKind.FILE_EXISTS
+                    and _is_test_path(item.target)
+                )
+                or (
+                    phase == "implement"
+                    and item.kind in FILE_KINDS
+                    and not _is_test_path(item.target)
+                )
+            )
+            if matches:
+                ids.append(item.item_id)
+        return tuple(ids)
+
+    @staticmethod
+    def _attach_unbound_acceptance(
+        steps: tuple[PlanStep, ...], intent: TaskIntent
+    ) -> tuple[PlanStep, ...]:
+        """把未被任何步骤绑定的必需验收项挂到实现或测试编写步骤上。"""
+        bound = {
+            item_id for step in steps for item_id in step.acceptance_ids
+        }
+        unbound = [
+            item.item_id
+            for item in intent.acceptance
+            if item.required and item.item_id not in bound
+        ]
+        if not unbound or not steps:
+            return steps
+        target = next(
+            (
+                index
+                for index, step in enumerate(steps)
+                if phase_of(step.objective) in {"implement", "test_author"}
+            ),
+            0,
+        )
+        entries = list(steps)
+        entries[target] = replace(
+            entries[target],
+            acceptance_ids=entries[target].acceptance_ids + tuple(unbound),
+        )
+        return tuple(entries)
+
+    @staticmethod
     def _criteria_for(objective: str) -> str:
         if "总结" in objective:
             return "已汇总修改文件、实现内容和测试验证结果。"
@@ -172,6 +263,14 @@ class TaskPlanner:
         if "实现" in objective or "修改" in objective:
             return "相关代码已创建或修改，并满足用户明确要求。"
         return f"已获得与“{objective}”对应的工具或测试证据，且没有未处理错误。"
+
+
+def _is_test_path(target: str | None) -> bool:
+    """判断验收目标是否指向测试文件。"""
+    if not target:
+        return False
+    lowered = target.lower()
+    return "test" in lowered or lowered.startswith("tests/")
 
 
 def create_task_plan(
