@@ -851,7 +851,11 @@ class Agent:
                         change.path: change.to_dict()
                         for change in safety.change_set.summary().changes
                     }
-                    tool_result = self.registry.execute(tool_name, arguments)
+                    tool_result = self.registry.execute(
+                        tool_name,
+                        arguments,
+                        event_recorder=trace.record,
+                    )
                 except KeyboardInterrupt:
                     trace.record(
                         "task_stopped",
