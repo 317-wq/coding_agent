@@ -8,6 +8,7 @@ from app.runtime.workspace import WorkspaceContext
 from app.tools.authorization import AuthorizationDecision
 from app.tools.registry import ToolRegistry, ToolSpec
 from app.tools.result import ToolResult
+from tests.stub_tools import passed_test
 
 EMPTY_PARAMETERS = {
     "type": "object",
@@ -52,7 +53,7 @@ def _registry(tmp_path, authorizer):
         return ToolResult.failure("模拟修改失败")
 
     registry.register(ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, failing_edit))
-    for tool_name in ("read_file", "create_file", "run_tests"):
+    for tool_name in ("read_file", "create_file"):
         registry.register(
             ToolSpec(
                 tool_name,
@@ -61,6 +62,9 @@ def _registry(tmp_path, authorizer):
                 lambda: ToolResult.success("完成"),
             )
         )
+    registry.register(
+        ToolSpec("run_tests", "运行测试", EMPTY_PARAMETERS, passed_test)
+    )
     return registry
 
 
