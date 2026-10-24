@@ -37,18 +37,16 @@ cp .env.example .env
 `.env` 不应提交到 Git。常用配置如下：
 
 ```dotenv
-QWEN_API_KEY=your-api-key
-QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-QWEN_CHAT_MODEL_1=qwen3.7-flash
+# 新格式：每个 provider 一组配置，MODELS 用英文逗号分隔
+MODEL_PROVIDER_1_NAME=qwen
+MODEL_PROVIDER_1_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+MODEL_PROVIDER_1_API_KEY=your-api-key
+MODEL_PROVIDER_1_MODELS=qwen3.7-flash,qwen3.8-max
 ```
 
-也支持 OpenAI 兼容服务：
+同一个 provider 内按 `MODELS` 顺序故障转移，多个 provider 之间按序号顺序切换（最多 5 个）。只有额度、限流或模型不可用时才切换，其他错误直接报错。
 
-```dotenv
-GPT_API_KEY=your-api-key
-GPT_BASE_URL=https://example.com/v1
-GPT_CHAT_MODEL=your-model
-```
+旧配置 `QWEN_API_KEY` / `QWEN_BASE_URL` / `QWEN_CHAT_MODEL_1..10` 仍然可用，会被映射为单个 `qwen` provider；两种格式同时存在时优先使用新格式。
 
 ## 运行
 
