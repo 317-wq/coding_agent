@@ -11,13 +11,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from app.core.acceptance import AcceptanceResult
 from app.core.planner import PlanStepStatus, TaskPlan
 from app.core.task_result import TestEvidence, TestEvidenceStatus
-from app.core.test_evidence import (
-    has_structured_test_output,
-    latest_test_evidence,
-    summarize_test_evidence,
-)
+from app.core.test_evidence import structured_test_evidence
 from app.tools.result import ToolResult, ToolStatus
 from app.tools.test_result import TestRunResult
 
@@ -66,15 +63,7 @@ class CompletionVerifier:
         cls, test_results: Sequence[TestRunResult | str]
     ) -> tuple[TestEvidence, ...]:
         """只保留结构化测试结果，并按目标折叠为最新证据。"""
-        structured = tuple(
-            result
-            for result in test_results
-            if isinstance(result, TestRunResult)
-            or (isinstance(result, str) and has_structured_test_output(result))
-        )
-        if not structured:
-            return ()
-        return latest_test_evidence(summarize_test_evidence(structured))
+        return structured_test_evidence(test_results)
 
     @staticmethod
     def _evidence_text(evidence: TestEvidence) -> str:
@@ -88,8 +77,9 @@ class CompletionVerifier:
         plan: TaskPlan,
         tool_results: Sequence[ToolResult] = (),
         test_results: Sequence[TestRunResult | str] = (),
+        acceptance: Sequence[AcceptanceResult] = (),
     ) -> CompletionDecision:
-        """根据计划状态、工具结果和结构化测试证据严格判定复杂任务。"""
+        """根据计划状态、工具结果、测试证据与验收项严格判定复杂任务。"""
         if not isinstance(plan, TaskPlan):
             raise TypeError("计划必须是 TaskPlan。")
         if any(not isinstance(item, ToolResult) for item in tool_results):
@@ -167,6 +157,16 @@ class CompletionVerifier:
                 pending,
                 evidence=evidence,
             )
+        unmet = tuple(item for item in acceptance if not item.passed)
+        if unmet:
+            return CompletionDecision(
+                CompletionStatus.INCOMPLETE,
+                "未满足验收条件：" + "；".join(item.item.text for item in unmet),
+                pending,
+                evidence=tuple(
+                    f"{item.item.text}：{item.detail}" for item in unmet
+                ),
+            )
         return CompletionDecision(
             CompletionStatus.COMPLETE,
             "所有计划步骤已完成，且存在成功执行证据。",
@@ -230,7 +230,10 @@ def verify_completion(
     plan: TaskPlan,
     tool_results: Sequence[ToolResult] = (),
     test_results: Sequence[TestRunResult | str] = (),
+    acceptance: Sequence[AcceptanceResult] = (),
 ) -> CompletionDecision:
     """使用默认验证器执行完成判定。"""
 
-    return CompletionVerifier().verify(plan, tool_results, test_results)
+    return CompletionVerifier().verify(
+        plan, tool_results, test_results, acceptance
+    )
