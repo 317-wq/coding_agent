@@ -87,6 +87,7 @@ class TaskIntent:
 
 每项验收通过后 `PROJECT.md` 升版（从 v1.45 起），并在本节追加“已同步至 PROJECT.md vX.Y”。
 - 已同步至 PROJECT.md v1.45：计划升级为意图 / 验收项 / 步骤三层，并加入可执行性校验（L1–L6）（对应 C1）。
+- 已同步至 PROJECT.md v1.46：新增验收项证据核验，完成判定要求必需验收项全部满足（对应 C2）。
 
 ## 4. 本版要实现的模块功能
 
@@ -115,7 +116,7 @@ class TaskIntent:
     4. **待确认策略**：`open_questions` 非空且运行环境非交互时，在执行任何工具前停止，`stop_reason` 直接给出问题；交互模式通过 CLI 询问。
   - 完成条件：真实任务生成的计划不再包含无动作词步骤；`intent.acceptance` 至少包含 `TEST_PASSED` 与两个 `FILE_EXISTS`；Trace 出现 `intent_extracted`；`plan_lint` 每条规则都有单元测试。
 
-- [ ] **C2 · 验收条件必须被证据满足**
+- [x] **C2 · 验收条件必须被证据满足**
 
   - 现象：步骤目标写着“最后运行测试确认通过”，但只创建测试文件就被标记完成，机制上允许“没跑过测试也算完成”。
   - 根因：完成判定只看步骤状态、工具结果和测试结果，没有一个“用户要求的验收条件”清单去逐条核对。
@@ -129,6 +130,12 @@ class TaskIntent:
     2. `CompletionVerifier` 在原有规则之外，要求所有 `required` 验收项均已满足；未满足返回 `INCOMPLETE` 并列出缺失项。
     3. 计划里的“运行测试”阶段步骤仍保留，但不再是测试通过的唯一依据。
   - 完成条件：构造“有测试文件但没跑测试”的场景，完成判定为 `INCOMPLETE` 且缺失项为 `TEST_PASSED`；真实任务中测试通过后判定为 `COMPLETE`。
+
+- [ ] **C4 · 简单任务也走验收**
+
+  - 现象：验收核验只对有计划的复杂任务生效；被判为简单、又没有计划的短任务仍走 `verify_basic`，只要求“有成功证据”，不要求测试真的跑过。
+  - 改动：意图抽取提到计划之外，`TaskRunner` 始终持有意图；`verify_basic` 增加验收参数，未满足必需验收项时返回 `incomplete`。
+  - 完成条件：简单任务“运行测试确认通过”但只做了读取时判为 `incomplete`；简单只读任务（无测试要求）不受影响。
 
 - [ ] **C3 · 终止事件与停止原因完整**
 
@@ -146,7 +153,8 @@ class TaskIntent:
 - [ ] **行为等价**：`uv run pytest tests/test_runner_golden.py -q` 保持 6 passed，快照文件不得修改。
 - [ ] **真实复跑**：用第 2 节命令与任务重跑，要求状态 `completed`、`stop_reason` 为空、模型请求 ≤8 次、工作区 `pytest` 通过。
 - [x] **C1**：`create_task_plan(真实任务)` 无无动作词步骤；`intent.acceptance` 含 `TEST_PASSED` 与两个 `FILE_EXISTS`；lint 六条规则各有用例。
-- [ ] **C2**：“只建测试文件不跑测试”判为 `INCOMPLETE`；“跑通测试”判为 `COMPLETE`。
+- [x] **C2**：“只建测试文件不跑测试”判为 `INCOMPLETE`；“跑通测试”判为 `COMPLETE`。
+- [ ] **C4**：简单任务在缺少测试证据时判为 `incomplete`；只读任务不受影响。
 - [ ] **C3**：回滚取消路径产生 `task_stopped`；`stop_reason` 兜底与步骤号有单元测试。
 - [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框与基线版本只在验收通过后更新。
 
