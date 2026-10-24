@@ -89,6 +89,7 @@ class TaskIntent:
 - 已同步至 PROJECT.md v1.45：计划升级为意图 / 验收项 / 步骤三层，并加入可执行性校验（L1–L6）（对应 C1）。
 - 已同步至 PROJECT.md v1.46：新增验收项证据核验，完成判定要求必需验收项全部满足（对应 C2）。
 - 已同步至 PROJECT.md v1.47：回滚被拒记录终止事件，停止原因分级兜底并附待处理步骤（对应 C3）。
+- 已同步至 PROJECT.md v1.48：简单任务同样执行验收核验，只读路径不生成文件存在验收项（对应 C4）。
 
 ## 4. 本版要实现的模块功能
 
@@ -132,7 +133,7 @@ class TaskIntent:
     3. 计划里的“运行测试”阶段步骤仍保留，但不再是测试通过的唯一依据。
   - 完成条件：构造“有测试文件但没跑测试”的场景，完成判定为 `INCOMPLETE` 且缺失项为 `TEST_PASSED`；真实任务中测试通过后判定为 `COMPLETE`。
 
-- [ ] **C4 · 简单任务也走验收**
+- [x] **C4 · 简单任务也走验收**
 
   - 现象：验收核验只对有计划的复杂任务生效；被判为简单、又没有计划的短任务仍走 `verify_basic`，只要求“有成功证据”，不要求测试真的跑过。
   - 改动：意图抽取提到计划之外，`TaskRunner` 始终持有意图；`verify_basic` 增加验收参数，未满足必需验收项时返回 `incomplete`。
@@ -150,12 +151,12 @@ class TaskIntent:
 
 ## 5. 本版验收标准
 
-- [ ] **通用门槛**：每项完成后 `uv run pytest -q` 全绿、`uv run ruff check app tests` 输出 `All checks passed!`。
-- [ ] **行为等价**：`uv run pytest tests/test_runner_golden.py -q` 保持 6 passed；C1–C2 不得修改快照，C3 有意更新 `rollback_denied` 的停止原因，需在验收时逐项审阅差异。
-- [ ] **真实复跑**：用第 2 节命令与任务重跑，要求状态 `completed`、`stop_reason` 为空、模型请求 ≤8 次、工作区 `pytest` 通过。
+- [x] **通用门槛**：每项完成后 `uv run pytest -q` 全绿、`uv run ruff check app tests` 输出 `All checks passed!`。
+- [x] **行为等价**：`uv run pytest tests/test_runner_golden.py -q` 保持 6 passed；C1–C2 不得修改快照，C3 有意更新 `rollback_denied` 的停止原因，需在验收时逐项审阅差异。
+- [x] **真实复跑**：用第 2 节命令与任务重跑，要求状态 `completed`、`stop_reason` 为空、模型请求 ≤8 次、工作区 `pytest` 通过。
 - [x] **C1**：`create_task_plan(真实任务)` 无无动作词步骤；`intent.acceptance` 含 `TEST_PASSED` 与两个 `FILE_EXISTS`；lint 六条规则各有用例。
 - [x] **C2**：“只建测试文件不跑测试”判为 `INCOMPLETE`；“跑通测试”判为 `COMPLETE`。
-- [ ] **C4**：简单任务在缺少测试证据时判为 `incomplete`；只读任务不受影响。
+- [x] **C4**：简单任务在缺少测试证据时判为 `incomplete`；只读任务不受影响。
 - [x] **C3**：回滚取消路径产生 `task_stopped`；`stop_reason` 兜底与步骤号有单元测试。
 - [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框与基线版本只在验收通过后更新。
 
