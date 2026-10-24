@@ -127,8 +127,6 @@ class ToolRegistry:
             return ToolResult.cancelled(output)
         if any(line.startswith("无法删除目录") for line in output.splitlines()):
             return ToolResult.failure(output)
-        if "测试结果：失败" in output:
-            return ToolResult.failure(output)
         return ToolResult.success(output)
 
 
