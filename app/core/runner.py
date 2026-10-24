@@ -28,6 +28,7 @@ from app.core.completion import (
 )
 from app.core.complexity import judge_task_complexity
 from app.core.context import ContextManager
+from app.core.intent import TaskIntent, extract_intent
 from app.core.planner import TaskPlan, carry_completed_steps, create_task_plan
 from app.core.recovery import RecoveryAction, RecoveryDecision
 from app.core.requirements import TaskRequirementVerifier
@@ -127,6 +128,7 @@ class TaskRunner:
         self.messages: list[ChatCompletionMessageParam] = []
         self.tool_call_count = 0
         self.clarification: str | None = None
+        self.intent: TaskIntent | None = None
 
     def _debug_print(self, message: str) -> None:
         """仅在调试模式输出底层执行日志。"""
@@ -172,21 +174,24 @@ class TaskRunner:
             if decision.requires_planning
             else None
         )
+        self.intent = (
+            self.plan.intent
+            if self.plan is not None and self.plan.intent is not None
+            else extract_intent(task)
+        )
         if self.plan is not None:
             self.trace.record("plan_created", plan=self.plan.to_dict())
             if self.plan.lint_issues:
                 self.trace.record("plan_linted", issues=list(self.plan.lint_issues))
-            intent = self.plan.intent
-            if intent is not None:
-                self.trace.record(
-                    "intent_extracted",
-                    acceptance=[item.to_dict() for item in intent.acceptance],
-                    open_questions=list(intent.open_questions),
-                )
-                if intent.open_questions and not sys.stdin.isatty():
-                    self.clarification = (
-                        "任务需要确认：" + "；".join(intent.open_questions)
-                    )
+        self.trace.record(
+            "intent_extracted",
+            acceptance=[item.to_dict() for item in self.intent.acceptance],
+            open_questions=list(self.intent.open_questions),
+        )
+        if self.intent.open_questions and not sys.stdin.isatty():
+            self.clarification = (
+                "任务需要确认：" + "；".join(self.intent.open_questions)
+            )
         self.state_manager = (
             PlanStateManager(self.plan) if self.plan is not None else None
         )
@@ -389,6 +394,7 @@ class TaskRunner:
                 decision = CompletionVerifier().verify_basic(
                     self.context.context.tool_results,
                     self.context.context.test_results,
+                    self._acceptance_results(),
                 )
             self.trace.record(
                 "completion_checked",
@@ -1311,10 +1317,8 @@ class TaskRunner:
 
     def _acceptance_results(self) -> tuple[AcceptanceResult, ...]:
         """按验收项核验当前证据，并把结果写入 Trace。"""
-        if self.plan is None or self.plan.intent is None:
-            return ()
-        intent = self.plan.intent
-        if not intent.acceptance:
+        intent = self.intent
+        if intent is None or not intent.acceptance:
             return ()
         results = AcceptanceVerifier().verify(
             intent,
