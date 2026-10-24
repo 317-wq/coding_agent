@@ -25,6 +25,16 @@ from app.runtime.trace import ExecutionTrace
 from app.tools.change_set import ChangeSetSummary
 
 
+def _with_pending_steps(
+    reason: str, status: CompletionStatus, pending: tuple[int, ...]
+) -> str:
+    """在未完成原因后附上待处理步骤编号。"""
+    if status is not CompletionStatus.INCOMPLETE or not pending:
+        return reason
+    ids = "、".join(str(step_id) for step_id in pending)
+    return f"{reason}（待处理步骤：{ids}）"
+
+
 class TaskResultAggregator:
     """将运行时证据转换为一个不依赖模型总结的任务结果。"""
 
@@ -163,12 +173,31 @@ class TaskResultAggregator:
         if status is TaskStatus.COMPLETED:
             return None
         if completion is not None and completion.reason:
-            return completion.reason
+            return _with_pending_steps(
+                completion.reason,
+                completion.status,
+                completion.pending_step_ids,
+            )
         if trace is not None:
             for event in reversed(trace.events):
                 if event["event"] in {"task_failed", "task_stopped"}:
                     details = event.get("details", {})
-                    return str(details.get("reason") or details.get("error") or "任务未完成")
+                    return str(
+                        details.get("reason")
+                        or details.get("error")
+                        or "任务未完成"
+                    )
+            for event in reversed(trace.events):
+                if event["event"] == "completion_checked":
+                    details = event.get("details", {})
+                    reason = str(details.get("reason") or "").strip()
+                    if reason:
+                        pending = tuple(details.get("pending_step_ids") or ())
+                        return _with_pending_steps(
+                            reason,
+                            CompletionStatus(str(details.get("status"))),
+                            pending,
+                        )
         return "任务未完成。"
 
     @staticmethod
