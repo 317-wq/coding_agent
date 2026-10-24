@@ -8,6 +8,12 @@ from app.tools.registry import ToolRegistry, ToolSpec
 from app.tools.result import ToolStatus
 
 
+def _run(test_path: str) -> str:
+    """执行测试工具并取出面向人的文本，保持原有断言口径。"""
+    result = tools.run_tests(test_path)
+    return getattr(result, "result", None) or getattr(result, "error", None) or str(result)
+
+
 @pytest.fixture(autouse=True)
 def restore_workspace():
     yield
@@ -47,7 +53,7 @@ def test_run_tests_marks_pytest_collection_conflict(tmp_path: Path):
             "def test_ok():\n    assert True\n", encoding="utf-8"
         )
     tools.set_workspace(WorkspaceContext.from_path(tmp_path))
-    result = tools.run_tests(".")
+    result = _run(".")
     assert "测试错误类型：收集冲突" in result
     assert "测试结果：失败" in result
 
@@ -56,7 +62,7 @@ def test_run_tests_distinguishes_missing_tests_from_assertion_failure(tmp_path: 
     """验证空测试目录不会被误报为断言失败。"""
     tools.set_workspace(WorkspaceContext.from_path(tmp_path))
 
-    result = tools.run_tests(".")
+    result = _run(".")
 
     assert "测试退出码：5" in result
     assert "测试错误类型：未发现测试" in result
@@ -79,7 +85,7 @@ def test_run_tests_marks_circular_import_as_repairable_code_error(tmp_path: Path
     )
     tools.set_workspace(WorkspaceContext.from_path(tmp_path))
 
-    result = tools.run_tests("test_cycle.py")
+    result = _run("test_cycle.py")
 
     assert "测试结果：失败" in result
     assert "测试错误类型：代码导入错误" in result
@@ -94,7 +100,7 @@ def test_name_error_in_test_code_is_classified_for_repair(tmp_path: Path):
     )
     tools.set_workspace(WorkspaceContext.from_path(tmp_path))
 
-    result = tools.run_tests("test_calculator.py")
+    result = _run("test_calculator.py")
 
     assert "测试错误类型：测试代码" in result
 
@@ -118,7 +124,7 @@ def test_list_and_run_tests_preserve_exact_python_filename(tmp_path: Path):
     target.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
 
     listing = tools.list_files("tests")
-    result = tools.run_tests(str(target))
+    result = _run(str(target))
 
     assert "文件: tests/test_completion_probe.py" in listing
     assert "测试目标：tests/test_completion_probe.py" in result
@@ -134,7 +140,7 @@ def test_run_tests_accepts_pytest_node_id(tmp_path: Path):
         encoding="utf-8",
     )
 
-    result = tools.run_tests("test_sample.py::TestSample::test_ok")
+    result = _run("test_sample.py::TestSample::test_ok")
 
     assert "测试目标：test_sample.py::TestSample::test_ok" in result
     assert "测试退出码：0" in result
