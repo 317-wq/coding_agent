@@ -177,8 +177,9 @@ class CompletionVerifier:
         self,
         tool_results: Sequence[ToolResult] = (),
         test_results: Sequence[TestRunResult | str] = (),
+        acceptance: Sequence[AcceptanceResult] = (),
     ) -> CompletionDecision:
-        """验证简单任务也具备结构化执行证据。"""
+        """验证简单任务也具备结构化执行证据与验收项。"""
 
         if any(not isinstance(item, ToolResult) for item in tool_results):
             raise TypeError("工具结果必须是 ToolResult。")
@@ -204,6 +205,15 @@ class CompletionVerifier:
                 CompletionStatus.BLOCKED,
                 "测试结果包含失败或错误。",
                 evidence=failed_tests,
+            )
+        unmet = tuple(item for item in acceptance if not item.passed)
+        if unmet:
+            return CompletionDecision(
+                CompletionStatus.INCOMPLETE,
+                "未满足验收条件：" + "；".join(item.item.text for item in unmet),
+                evidence=tuple(
+                    f"{item.item.text}：{item.detail}" for item in unmet
+                ),
             )
         evidence = tuple(
             (item.result or "工具执行成功")
