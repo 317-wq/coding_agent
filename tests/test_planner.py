@@ -3,6 +3,8 @@ import json
 import pytest
 
 from app.core.complexity import TaskComplexity, judge_task_complexity
+from app.core.intent import EvidenceKind
+from app.core.plan_lint import phase_of
 from app.core.planner import (
     PlanStepStatus,
     TaskPlan,
@@ -117,3 +119,22 @@ def test_replan_carries_completed_steps_and_retries_failed_step():
         PlanStepStatus.COMPLETED,
         PlanStepStatus.PENDING,
     ]
+
+
+def test_non_actionable_requirement_fragment_is_merged():
+    """真实验证：需求细节不会被当成独立步骤，且补齐测试执行阶段。"""
+    task = (
+        "实现 calculator.py，提供 add(a, b) 和 divide(a, b) 两个函数；"
+        "divide 在 b 为 0 时抛出 ZeroDivisionError。"
+        "然后编写 tests/test_calculator.py 覆盖这两个函数，最后运行测试确认通过。"
+    )
+
+    plan = create_task_plan(task)
+
+    assert all(phase_of(step.objective) is not None for step in plan.steps)
+    assert any("运行指定测试" in step.objective for step in plan.steps)
+    assert plan.intent is not None
+    assert any(
+        item.kind is EvidenceKind.TEST_PASSED for item in plan.intent.acceptance
+    )
+    assert any(issue.startswith("L1:") for issue in plan.lint_issues)
