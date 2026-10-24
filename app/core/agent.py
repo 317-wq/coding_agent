@@ -1235,6 +1235,8 @@ class Agent:
                     break
 
                 if recovery.action is RecoveryAction.REPLAN:
+                    # 只有真正重建计划才消耗重规划预算，避免未应用的决策污染计数。
+                    safety.note_replan()
                     project_snapshot = ProjectExplorer(self.workspace).explore()
                     decision = judge_task_complexity(task, project_snapshot)
                     replacement_plan = create_task_plan(
