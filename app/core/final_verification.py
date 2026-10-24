@@ -9,11 +9,16 @@ from app.core.task_result import (
     TestEvidenceStatus,
     ToolCallSummary,
 )
-from app.core.test_evidence import latest_test_evidence, summarize_test_evidence
+from app.core.test_evidence import (
+    evidence_from_test_run,
+    latest_test_evidence,
+    summarize_test_evidence,
+)
 from app.runtime.trace import ExecutionTrace
 from app.runtime.workspace import WorkspaceContext
 from app.tools.change_set import ChangeSetSummary, TaskChangeSet
 from app.tools.git_repository import GitWorkingTreeState, inspect_git_worktree
+from app.tools.test_result import TestRunResult
 
 
 @dataclass(frozen=True)
@@ -113,6 +118,24 @@ class FinalStateVerifier:
             call_id = str(details.get("tool_call_id", ""))
             target = started_targets.get(call_id, ".")
             status = str(details.get("status", ""))
+            payload = details.get("test")
+            if isinstance(payload, dict):
+                try:
+                    structured = TestRunResult.from_dict(payload)
+                except (KeyError, TypeError, ValueError):
+                    structured = None
+                if structured is not None:
+                    if status == "cancelled":
+                        evidence.append(
+                            TestEvidence(
+                                target=structured.target,
+                                status=TestEvidenceStatus.NOT_RUN,
+                                output=structured.output or "测试已取消",
+                            )
+                        )
+                    else:
+                        evidence.append(evidence_from_test_run(structured))
+                    continue
             if status == "cancelled":
                 evidence.append(
                     TestEvidence(
