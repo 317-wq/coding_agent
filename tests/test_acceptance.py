@@ -3,7 +3,12 @@
 from pathlib import Path
 
 from app.core.acceptance import AcceptanceResult, AcceptanceVerifier
-from app.core.completion import CompletionStatus, verify_completion
+from app.core.agent import Agent
+from app.core.completion import (
+    CompletionStatus,
+    CompletionVerifier,
+    verify_completion,
+)
 from app.core.intent import AcceptanceItem, EvidenceKind, TaskIntent
 from app.core.planner import create_task_plan
 from app.core.task_result import TestEvidence, TestEvidenceStatus
@@ -169,3 +174,72 @@ def test_completion_requires_all_acceptance_items(tmp_path: Path):
 
     assert decision.status is CompletionStatus.INCOMPLETE
     assert "未满足验收条件" in decision.reason
+
+
+def test_basic_completion_requires_acceptance():
+    """简单任务也要求必需验收项满足。"""
+    unmet = AcceptanceResult(
+        item=AcceptanceItem(
+            item_id=1, text="测试通过", kind=EvidenceKind.TEST_PASSED
+        ),
+        passed=False,
+        detail="没有测试证据",
+    )
+
+    decision = CompletionVerifier().verify_basic(
+        [ToolResult.success("读过了")], [], [unmet]
+    )
+
+    assert decision.status is CompletionStatus.INCOMPLETE
+    assert "未满足验收条件" in decision.reason
+
+
+def test_basic_completion_without_acceptance_is_unchanged():
+    """没有验收项的简单任务行为不变。"""
+    decision = CompletionVerifier().verify_basic(
+        [ToolResult.success("读过了")], [], []
+    )
+
+    assert decision.status is CompletionStatus.COMPLETE
+
+
+def test_simple_task_verifies_acceptance_end_to_end(monkeypatch, tmp_path: Path):
+    """简单任务读取后满足验收项并完成。"""
+    from types import SimpleNamespace
+
+    from app.tools.registry import ToolRegistry, ToolSpec
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            "read_file",
+            "读取文件",
+            {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            lambda path=".": ToolResult.success("配置内容"),
+        )
+    )
+
+    class FakeModel:
+        calls = 0
+
+        def chat(self, messages, tools):
+            self.calls += 1
+            if self.calls == 1:
+                function = SimpleNamespace(name="read_file", arguments='{"path":"a.txt"}')
+                call = SimpleNamespace(id="read-1", function=function)
+                message = SimpleNamespace(content=None, tool_calls=[call])
+                return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+            message = SimpleNamespace(content="已读取并总结。", tool_calls=None)
+            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry)
+
+    agent.run("读取配置文件并总结")
+
+    assert agent.last_result is not None
+    assert agent.last_result.completed is True
