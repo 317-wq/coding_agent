@@ -12,13 +12,17 @@ from app.tools.result import ToolResult
 from app.tools.validation import ToolArgumentValidationError, validate_tool_arguments
 
 ToolExecutor = Callable[..., str | ToolResult]
+AuthorizationDescriber = Callable[[dict[str, Any]], dict[str, Any]]
+"""高风险工具的可选说明生成器：把执行参数扩展为授权时展示的清单。"""
 
 
 class RiskLevel(StrEnum):
-    """工具执行前需要考虑的风险等级。"""
+    """工具执行前需要考虑的风险等级。
+
+    只保留 LOW 与 HIGH：此前的 MEDIUM 没有任何行为分支，属于装饰性枚举。
+    """
 
     LOW = "low"
-    MEDIUM = "medium"
     HIGH = "high"
 
 
@@ -31,6 +35,7 @@ class ToolSpec:
     parameters: Mapping[str, Any]
     executor: ToolExecutor
     risk_level: RiskLevel = RiskLevel.LOW
+    describe_authorization: AuthorizationDescriber | None = None
 
     def to_model_definition(self) -> dict[str, Any]:
         """生成 OpenAI 兼容的函数工具定义。"""
@@ -79,8 +84,14 @@ class ToolRegistry:
 
         return [spec.to_model_definition() for spec in self._tools.values()]
 
-    def execute(self, name: str, arguments: object) -> ToolResult:
-        """通过注册表查找并执行工具。"""
+    def execute(
+        self,
+        name: str,
+        arguments: object,
+        *,
+        event_recorder: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> ToolResult:
+        """通过注册表查找并执行工具；高风险工具在此统一授权。"""
 
         spec = self.get(name)
         if spec is None:
@@ -94,13 +105,35 @@ class ToolRegistry:
             return ToolResult.failure(f"工具参数校验失败：{exc}")
 
         if spec.risk_level is RiskLevel.HIGH:
+            authorization_arguments = validated_arguments
+            if spec.describe_authorization is not None:
+                try:
+                    authorization_arguments = spec.describe_authorization(
+                        validated_arguments
+                    )
+                except Exception as exc:  # noqa: BLE001 - 授权说明必须失败关闭
+                    return ToolResult.failure(f"无法生成授权说明：{exc}")
             try:
                 decision = self.authorizer.authorize(
-                    spec.name, validated_arguments
+                    spec.name, authorization_arguments
                 )
             except Exception as exc:  # noqa: BLE001 - 授权边界必须失败关闭
+                self._record_authorization(
+                    event_recorder,
+                    spec.name,
+                    authorization_arguments,
+                    approved=False,
+                    reason=str(exc),
+                )
                 return ToolResult.failure(f"工具授权检查失败：{exc}")
 
+            self._record_authorization(
+                event_recorder,
+                spec.name,
+                authorization_arguments,
+                approved=decision.approved,
+                reason=decision.reason,
+            )
             if not decision.approved:
                 return ToolResult.cancelled(
                     f"已取消执行高风险工具 {spec.name}：{decision.reason}"
@@ -114,6 +147,26 @@ class ToolRegistry:
             return ToolResult.failure(f"工具执行异常：{exc}")
 
         return self._normalize_output(output)
+
+    @staticmethod
+    def _record_authorization(
+        recorder: Callable[[str, dict[str, Any]], None] | None,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        approved: bool,
+        reason: str,
+    ) -> None:
+        """把授权决定写入调用方提供的事件记录器。"""
+        if recorder is None:
+            return
+        recorder(
+            "tool_authorization_decided",
+            tool=tool_name,
+            approved=approved,
+            reason=reason,
+            arguments=arguments,
+        )
 
     @staticmethod
     def _normalize_output(output: str | ToolResult) -> ToolResult:
@@ -131,12 +184,12 @@ class ToolRegistry:
 
 
 TOOL_RISK_LEVELS = {
-    "create_directory": RiskLevel.MEDIUM,
-    "create_file": RiskLevel.MEDIUM,
     "delete_directory": RiskLevel.HIGH,
     "delete_file": RiskLevel.HIGH,
-    "edit_file": RiskLevel.MEDIUM,
-    "run_tests": RiskLevel.MEDIUM,
+}
+
+TOOL_AUTHORIZATION_DESCRIBERS: dict[str, AuthorizationDescriber] = {
+    "delete_directory": tools.describe_directory_deletion,
 }
 
 
@@ -161,6 +214,7 @@ def build_default_registry() -> ToolRegistry:
                     parameters=function["parameters"],
                     executor=executor,
                     risk_level=TOOL_RISK_LEVELS.get(name, RiskLevel.LOW),
+                    describe_authorization=TOOL_AUTHORIZATION_DESCRIBERS.get(name),
                 )
             )
 

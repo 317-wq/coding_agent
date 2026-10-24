@@ -93,7 +93,9 @@ def test_default_registry_contains_every_builtin_tool():
 
     assert DEFAULT_TOOL_REGISTRY.names() == definition_names
     assert DEFAULT_TOOL_REGISTRY.get("delete_file").risk_level is RiskLevel.HIGH
-    assert DEFAULT_TOOL_REGISTRY.get("run_tests").risk_level is RiskLevel.MEDIUM
+    assert DEFAULT_TOOL_REGISTRY.get("delete_directory").risk_level is RiskLevel.HIGH
+    assert DEFAULT_TOOL_REGISTRY.get("run_tests").risk_level is RiskLevel.LOW
+    assert DEFAULT_TOOL_REGISTRY.get("create_file").risk_level is RiskLevel.LOW
     assert DEFAULT_TOOL_REGISTRY.get("read_file").risk_level is RiskLevel.LOW
     assert DEFAULT_TOOL_REGISTRY.get("git_status").risk_level is RiskLevel.LOW
     assert DEFAULT_TOOL_REGISTRY.get("git_diff").risk_level is RiskLevel.LOW
