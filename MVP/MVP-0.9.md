@@ -150,7 +150,7 @@ class TaskIntent:
 ## 5. 本版验收标准
 
 - [ ] **通用门槛**：每项完成后 `uv run pytest -q` 全绿、`uv run ruff check app tests` 输出 `All checks passed!`。
-- [ ] **行为等价**：`uv run pytest tests/test_runner_golden.py -q` 保持 6 passed，快照文件不得修改。
+- [ ] **行为等价**：`uv run pytest tests/test_runner_golden.py -q` 保持 6 passed；C1–C2 不得修改快照，C3 有意更新 `rollback_denied` 的停止原因，需在验收时逐项审阅差异。
 - [ ] **真实复跑**：用第 2 节命令与任务重跑，要求状态 `completed`、`stop_reason` 为空、模型请求 ≤8 次、工作区 `pytest` 通过。
 - [x] **C1**：`create_task_plan(真实任务)` 无无动作词步骤；`intent.acceptance` 含 `TEST_PASSED` 与两个 `FILE_EXISTS`；lint 六条规则各有用例。
 - [x] **C2**：“只建测试文件不跑测试”判为 `INCOMPLETE`；“跑通测试”判为 `COMPLETE`。
