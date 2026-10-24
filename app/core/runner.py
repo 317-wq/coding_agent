@@ -29,9 +29,15 @@ from app.core.completion import (
 from app.core.complexity import judge_task_complexity
 from app.core.context import ContextManager
 from app.core.intent import TaskIntent, extract_intent
-from app.core.planner import TaskPlan, carry_completed_steps, create_task_plan
+from app.core.planner import (
+    PlanStepStatus,
+    TaskPlan,
+    carry_completed_steps,
+    create_task_plan,
+)
 from app.core.recovery import RecoveryAction, RecoveryDecision
 from app.core.requirements import TaskRequirementVerifier
+from app.core.task_result import TestEvidenceStatus
 from app.core.task_safety import TaskConstraintViolation, TaskSafetySession
 from app.core.task_state import PlanStateManager
 from app.core.test_evidence import structured_test_evidence
@@ -84,6 +90,10 @@ class _PreparedCall:
     answer: str | None = None
 
 
+MAX_STALLED_ROUNDS = 4
+"""连续多少轮计划状态无变化后停止，避免空转到轮次上限。"""
+
+
 class _CallDecision(StrEnum):
     """预检阶段对一次工具调用的处置结果。"""
 
@@ -129,6 +139,8 @@ class TaskRunner:
         self.tool_call_count = 0
         self.clarification: str | None = None
         self.intent: TaskIntent | None = None
+        self._progress_signature: tuple[tuple[int, str], ...] = ()
+        self._stalled_rounds = 0
 
     def _debug_print(self, message: str) -> None:
         """仅在调试模式输出底层执行日志。"""
@@ -145,6 +157,9 @@ class TaskRunner:
             answer = self._run_step(step)
             if answer is not None:
                 return answer
+            stalled = self._detect_stall()
+            if stalled is not None:
+                return stalled
         return self._finish_at_step_limit(task)
 
     def _initialize(self, task: str) -> None:
@@ -381,6 +396,7 @@ class TaskRunner:
     ) -> str | None:
         """模型给出文字结论时执行完成判定与恢复决策。"""
         answer = message.content or "任务结束，但模型没有提供文字总结。"
+        self._satisfy_conditional_steps()
         if self.context is not None:
             completion_check_id = f"completion-{step}"
             if self.plan is not None:
@@ -1265,6 +1281,7 @@ class TaskRunner:
 
     def _finish_at_step_limit(self, task: str) -> str:
         """轮次耗尽时用已有证据做确定性收尾核验。"""
+        self._satisfy_conditional_steps()
         if self.plan is not None and self.context is not None:
             final_decision = verify_completion(
                 self.context.context.plan or self.plan,
@@ -1314,6 +1331,69 @@ class TaskRunner:
         message = result.error or ""
         markers = ("工作目录之外", "工作区之外", "路径越界", "符号链接")
         return any(marker in message for marker in markers)
+
+    def _satisfy_conditional_steps(self) -> None:
+        """测试全部通过时，把未完成的条件步骤视为已满足。"""
+        if self.state_manager is None or self.context is None:
+            return
+        tests = structured_test_evidence(self.context.context.test_results)
+        if not tests or any(
+            evidence.status is not TestEvidenceStatus.PASSED for evidence in tests
+        ):
+            return
+        plan = self.state_manager.state().plan
+        satisfied = False
+        for step in plan.steps:
+            if step.status is not PlanStepStatus.PENDING or not step.conditional:
+                continue
+            self.state_manager.start_step(step.step_id)
+            self.state_manager.complete_step(step.step_id)
+            self.trace.record(
+                "conditional_step_satisfied",
+                step_id=step.step_id,
+                reason="测试已通过，条件步骤无需执行",
+            )
+            satisfied = True
+        if satisfied:
+            self.plan = self.state_manager.state().plan
+            self.context.update_plan(
+                self.plan, self.state_manager.state().current_step_id
+            )
+
+    def _detect_stall(self) -> str | None:
+        """连续多轮没有推进计划步骤时停止，避免空转到轮次上限。"""
+        if self.state_manager is None:
+            return None
+        plan = self.state_manager.state().plan
+        signature = tuple(
+            (step.step_id, step.status.value) for step in plan.steps
+        )
+        if signature != self._progress_signature:
+            self._progress_signature = signature
+            self._stalled_rounds = 0
+            return None
+        self._stalled_rounds += 1
+        if self._stalled_rounds < MAX_STALLED_ROUNDS:
+            return None
+        pending = tuple(
+            step.step_id
+            for step in plan.steps
+            if step.status is PlanStepStatus.PENDING
+        )
+        reason = (
+            f"连续 {self._stalled_rounds} 轮没有推进计划步骤，"
+            "已停止以避免继续消耗调用"
+        )
+        if pending:
+            ids = "、".join(str(step_id) for step_id in pending)
+            reason += f"（待处理步骤：{ids}）"
+        reason += "；请检查计划或补充输入后重试。"
+        self.trace.record(
+            "task_stopped",
+            reason=reason,
+            stalled_rounds=self._stalled_rounds,
+        )
+        return reason
 
     def _acceptance_results(self) -> tuple[AcceptanceResult, ...]:
         """按验收项核验当前证据，并把结果写入 Trace。"""
