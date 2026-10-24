@@ -39,6 +39,7 @@ class PlanStep:
     completion_criteria: str
     status: PlanStepStatus = PlanStepStatus.PENDING
     acceptance_ids: tuple[int, ...] = ()
+    conditional: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +48,7 @@ class PlanStep:
             "completion_criteria": self.completion_criteria,
             "status": self.status.value,
             "acceptance_ids": list(self.acceptance_ids),
+            "conditional": self.conditional,
         }
 
 
@@ -101,12 +103,15 @@ class TaskPlanner:
                 f"{issue.rule}: {issue.detail}" for issue in result.issues
             )
 
+        repair_conditional = bool(_CONDITIONAL_PATTERN.search(normalized))
         steps = tuple(
             PlanStep(
                 step_id=index,
                 objective=objective,
                 completion_criteria=self._criteria_for(objective),
                 acceptance_ids=self._bind_acceptance(objective, intent),
+                conditional=repair_conditional
+                and phase_of(objective) == "implement",
             )
             for index, objective in enumerate(objectives, start=1)
         )
@@ -263,6 +268,12 @@ class TaskPlanner:
         if "实现" in objective or "修改" in objective:
             return "相关代码已创建或修改，并满足用户明确要求。"
         return f"已获得与“{objective}”对应的工具或测试证据，且没有未处理错误。"
+
+
+_CONDITIONAL_PATTERN = re.compile(
+    r"如果失败|若失败|如有失败|失败时|必要时|如有问题|"
+    r"直到通过|直到测试通过|直到全部通过|直到所有测试通过"
+)
 
 
 def _is_test_path(target: str | None) -> bool:
