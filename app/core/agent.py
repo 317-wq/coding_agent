@@ -33,6 +33,7 @@ from app.tools.git_repository import inspect_git_repository
 from app.tools.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from app.tools.result import ToolResult, ToolStatus
 from app.tools.rollback import AuthorizedRollback, RollbackStatus
+from app.tools.test_result import TestRunResult
 
 SYSTEM_PROMPT = """
 你是一个能够实际编写和修改 Python 代码的 Coding Agent。
@@ -992,7 +993,13 @@ class Agent:
                     before_trim = self.last_context.context.truncated_count
                     if tool_name == "run_tests":
                         self.last_context.add_test_result(
-                            tool_result.result or tool_result.error or "测试执行失败"
+                            tool_result.data
+                            if isinstance(tool_result.data, TestRunResult)
+                            else (
+                                tool_result.result
+                                or tool_result.error
+                                or "测试执行失败"
+                            )
                         )
                     else:
                         self.last_context.add_tool_result(tool_result)
@@ -1098,6 +1105,9 @@ class Agent:
                         recoverable_paths=recovery.recoverable_paths,
                     )
 
+                trace_details: dict[str, Any] = {}
+                if isinstance(tool_result.data, TestRunResult):
+                    trace_details["test"] = tool_result.data.to_dict()
                 trace.record(
                     "tool_call_finished",
                     tool=tool_name,
@@ -1107,6 +1117,7 @@ class Agent:
                     result=tool_result.result,
                     error=tool_result.error,
                     is_error=tool_result.status is ToolStatus.FAILURE,
+                    **trace_details,
                 )
                 result_json = tool_result.to_json()
                 self._debug_print(f"[Tool Result] {result_json[:500]}")
