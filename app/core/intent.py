@@ -94,11 +94,25 @@ _IGNORED_CALLS = {
 
 MAX_ACCEPTANCE_ITEMS = 8
 
+_READ_VERBS = re.compile(r"阅读|读取|查看|检查|分析|搜索")
+_WRITE_VERBS = re.compile(r"创建|新增|编写|实现|生成|添加|修改|修复|重构|删除")
+_CLAUSE_SPLIT = re.compile(r"[。；;\n]")
+
 
 def _first_sentence(task: str) -> str:
     """取任务的第一句作为目标描述。"""
     first = re.split(r"[。\n]", task, maxsplit=1)[0].strip()
     return first or task.strip()
+
+
+def _is_read_only_reference(task: str, path: str) -> bool:
+    """判断路径是否只出现在只读上下文里（该路径不要求必须存在）。"""
+    for clause in _CLAUSE_SPLIT.split(task):
+        if path in clause:
+            return bool(_READ_VERBS.search(clause)) and not (
+                _WRITE_VERBS.search(clause)
+            )
+    return False
 
 
 def extract_intent(task: str) -> TaskIntent:
@@ -137,7 +151,8 @@ def extract_intent(task: str) -> TaskIntent:
         )
 
     for path in paths[:4]:
-        add(f"{path} 存在", EvidenceKind.FILE_EXISTS, path)
+        if not _is_read_only_reference(normalized, path):
+            add(f"{path} 存在", EvidenceKind.FILE_EXISTS, path)
 
     for name in list(dict.fromkeys(_EXCEPTION_PATTERN.findall(normalized)))[:3]:
         add(f"源码包含 {name}", EvidenceKind.CONTENT_CONTAINS, name)
