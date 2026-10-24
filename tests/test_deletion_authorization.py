@@ -2,9 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
-from app import tools
 from app.runtime.workspace import WorkspaceContext
 from app.tools.authorization import AuthorizationDecision
 from app.tools.registry import RiskLevel, build_default_registry
@@ -24,17 +21,9 @@ class RecordingAuthorizer:
         return self.decision
 
 
-@pytest.fixture(autouse=True)
-def restore_workspace():
-    """每条用例结束后恢复默认工作区。"""
-    yield
-    tools.set_workspace(WorkspaceContext.from_path(tools.DEFAULT_WORKSPACE))
-
-
 def _registry(tmp_path: Path, decision: AuthorizationDecision):
     """在临时工作区上构建默认注册表并替换授权器。"""
-    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
-    registry = build_default_registry()
+    registry = build_default_registry(WorkspaceContext.from_path(tmp_path))
     authorizer = RecordingAuthorizer(decision)
     registry.authorizer = authorizer
     return registry, authorizer
@@ -124,8 +113,7 @@ def test_non_interactive_delete_is_cancelled_with_reason(tmp_path: Path, monkeyp
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     target = tmp_path / "d.txt"
     target.write_text("x", encoding="utf-8")
-    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
-    registry = build_default_registry()
+    registry = build_default_registry(WorkspaceContext.from_path(tmp_path))
 
     result = registry.execute("delete_file", {"path": "d.txt"})
 
@@ -134,9 +122,9 @@ def test_non_interactive_delete_is_cancelled_with_reason(tmp_path: Path, monkeyp
     assert target.exists()
 
 
-def test_only_deletions_are_high_risk_and_medium_is_gone():
+def test_only_deletions_are_high_risk_and_medium_is_gone(tmp_path: Path):
     """验证风险等级只保留 LOW/HIGH，且只有删除属于高风险。"""
-    registry = build_default_registry()
+    registry = build_default_registry(WorkspaceContext.from_path(tmp_path))
 
     assert not hasattr(RiskLevel, "MEDIUM")
     for name in ("create_file", "edit_file", "run_tests", "read_file"):

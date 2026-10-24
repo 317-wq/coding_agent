@@ -1,4 +1,4 @@
-from app import main
+from app.cli import main
 
 
 def test_read_task_supports_multiline_until_end(monkeypatch):

@@ -26,11 +26,10 @@ from app.runtime.explorer import ProjectExplorer
 from app.runtime.model import ModelAdapter
 from app.runtime.trace import ExecutionTrace
 from app.runtime.workspace import WorkspaceContext
-from app.tools import set_workspace
 from app.tools.change_set import ChangeSetError, ChangeSetSummary
 from app.tools.change_snapshot import SnapshotError
 from app.tools.git_repository import inspect_git_repository
-from app.tools.registry import DEFAULT_TOOL_REGISTRY, ToolRegistry
+from app.tools.registry import ToolRegistry, build_default_registry
 from app.tools.result import ToolResult, ToolStatus
 from app.tools.rollback import AuthorizedRollback, RollbackStatus
 from app.tools.test_result import TestRunResult
@@ -74,13 +73,14 @@ class Agent:
         workspace: WorkspaceContext,
         max_steps: int = 20,
         max_tool_calls: int = 40,
-        registry: ToolRegistry = DEFAULT_TOOL_REGISTRY,
+        registry: ToolRegistry | None = None,
         debug: bool = False,
         event_listener: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.workspace = workspace
-        self.registry = registry
-        set_workspace(workspace)
+        self.registry = (
+            registry if registry is not None else build_default_registry(workspace)
+        )
         self.model = ModelAdapter()
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls

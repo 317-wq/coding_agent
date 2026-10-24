@@ -1,18 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
-from app import tools
 from app.core.agent import Agent
 from app.runtime.explorer import ProjectExplorer
 from app.runtime.workspace import WorkspaceContext
-
-
-@pytest.fixture(autouse=True)
-def restore_default_workspace():
-    yield
-    tools.set_workspace(WorkspaceContext.from_path(tools.DEFAULT_WORKSPACE))
 
 
 def test_explorer_extracts_structure_and_key_information(tmp_path: Path):

@@ -2,9 +2,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
-from app import tools
 from app.core.agent import Agent
 from app.runtime.workspace import WorkspaceContext
 from app.tools.authorization import AuthorizationDecision
@@ -16,12 +13,6 @@ EMPTY_PARAMETERS = {
     "properties": {},
     "additionalProperties": False,
 }
-
-
-@pytest.fixture(autouse=True)
-def restore_default_workspace():
-    yield
-    tools.set_workspace(WorkspaceContext.from_path(tools.DEFAULT_WORKSPACE))
 
 
 def make_spec(name, executor):

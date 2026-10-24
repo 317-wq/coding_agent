@@ -314,7 +314,7 @@ def run(
             "--workspace",
             help="Agent 工作区路径，默认为 workspace/demo。",
         ),
-    ] = tools.WORKSPACE,
+    ] = tools.DEFAULT_WORKSPACE,
     output_format: Annotated[
         OutputFormat,
         typer.Option(

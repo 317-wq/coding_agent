@@ -4,22 +4,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import git_tools, tools
 from app.core.agent import Agent
 from app.runtime.workspace import WorkspaceContext
+from app.tools import git_tools, tools
 from app.tools.registry import (
-    DEFAULT_TOOL_REGISTRY,
     RiskLevel,
     ToolRegistry,
     ToolSpec,
+    build_default_registry,
 )
 from app.tools.result import ToolResult, ToolStatus
-
-
-@pytest.fixture(autouse=True)
-def restore_default_workspace():
-    yield
-    tools.set_workspace(WorkspaceContext.from_path(tools.DEFAULT_WORKSPACE))
 
 
 def make_spec(name="echo", executor=lambda value: value):
@@ -90,15 +84,18 @@ def test_default_registry_contains_every_builtin_tool():
         definition["function"]["name"]
         for definition in (*tools.TOOL_DEFINITIONS, *git_tools.TOOL_DEFINITIONS)
     )
+    registry = build_default_registry(
+        WorkspaceContext.from_path(tools.DEFAULT_WORKSPACE)
+    )
 
-    assert DEFAULT_TOOL_REGISTRY.names() == definition_names
-    assert DEFAULT_TOOL_REGISTRY.get("delete_file").risk_level is RiskLevel.HIGH
-    assert DEFAULT_TOOL_REGISTRY.get("delete_directory").risk_level is RiskLevel.HIGH
-    assert DEFAULT_TOOL_REGISTRY.get("run_tests").risk_level is RiskLevel.LOW
-    assert DEFAULT_TOOL_REGISTRY.get("create_file").risk_level is RiskLevel.LOW
-    assert DEFAULT_TOOL_REGISTRY.get("read_file").risk_level is RiskLevel.LOW
-    assert DEFAULT_TOOL_REGISTRY.get("git_status").risk_level is RiskLevel.LOW
-    assert DEFAULT_TOOL_REGISTRY.get("git_diff").risk_level is RiskLevel.LOW
+    assert registry.names() == definition_names
+    assert registry.get("delete_file").risk_level is RiskLevel.HIGH
+    assert registry.get("delete_directory").risk_level is RiskLevel.HIGH
+    assert registry.get("run_tests").risk_level is RiskLevel.LOW
+    assert registry.get("create_file").risk_level is RiskLevel.LOW
+    assert registry.get("read_file").risk_level is RiskLevel.LOW
+    assert registry.get("git_status").risk_level is RiskLevel.LOW
+    assert registry.get("git_diff").risk_level is RiskLevel.LOW
 
 
 def test_model_definition_is_a_copy():

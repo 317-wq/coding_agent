@@ -149,19 +149,3 @@ class GitReadTools:
         if len(output) > MAX_GIT_OUTPUT:
             return output[:MAX_GIT_OUTPUT] + "\nGit 输出过长，已截断。"
         return output
-
-
-def git_status(path: str = ".") -> str:
-    """读取当前受控工作区的 Git 状态。"""
-
-    from app import tools
-
-    return GitReadTools(tools.WORKSPACE_CONTEXT).status(path)
-
-
-def git_diff(path: str = ".", staged: bool = False) -> str:
-    """读取当前受控工作区的 Git 差异。"""
-
-    from app import tools
-
-    return GitReadTools(tools.WORKSPACE_CONTEXT).diff(path, staged)

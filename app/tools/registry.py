@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from app.runtime.workspace import WorkspaceContext
 from app.tools import git_tools, tools
 from app.tools.authorization import ConsoleAuthorizer, ToolAuthorizer
+from app.tools.git_tools import GitReadTools
 from app.tools.result import ToolResult
 from app.tools.validation import ToolArgumentValidationError, validate_tool_arguments
 
@@ -188,37 +190,49 @@ TOOL_RISK_LEVELS = {
     "delete_file": RiskLevel.HIGH,
 }
 
-TOOL_AUTHORIZATION_DESCRIBERS: dict[str, AuthorizationDescriber] = {
-    "delete_directory": tools.describe_directory_deletion,
-}
 
+def build_default_registry(workspace: WorkspaceContext) -> ToolRegistry:
+    """按受控工作区建立内置工具注册表。
 
-def build_default_registry() -> ToolRegistry:
-    """根据当前内置工具定义建立默认注册表。"""
+    工具实例绑定 workspace，注册表只保存规格与执行入口，因此同一进程可以
+    为不同工作区各建一个注册表并行执行。
+    """
 
     registry = ToolRegistry()
+    builtin = tools.WorkspaceTools(workspace)
+    git_reader = GitReadTools(workspace)
+    describers: dict[str, AuthorizationDescriber] = {
+        "delete_directory": builtin.describe_directory_deletion,
+    }
+    git_executors = {
+        "git_status": git_reader.status,
+        "git_diff": git_reader.diff,
+    }
 
-    tool_modules = (
-        (tools, tools.TOOL_DEFINITIONS),
-        (git_tools, git_tools.TOOL_DEFINITIONS),
-    )
-    for module, definitions in tool_modules:
-        for definition in definitions:
-            function = definition["function"]
-            name = function["name"]
-            executor = getattr(module, name)
-            registry.register(
-                ToolSpec(
-                    name=name,
-                    description=function["description"],
-                    parameters=function["parameters"],
-                    executor=executor,
-                    risk_level=TOOL_RISK_LEVELS.get(name, RiskLevel.LOW),
-                    describe_authorization=TOOL_AUTHORIZATION_DESCRIBERS.get(name),
-                )
+    for definition in tools.TOOL_DEFINITIONS:
+        function = definition["function"]
+        name = function["name"]
+        registry.register(
+            ToolSpec(
+                name=name,
+                description=function["description"],
+                parameters=function["parameters"],
+                executor=getattr(builtin, name),
+                risk_level=TOOL_RISK_LEVELS.get(name, RiskLevel.LOW),
+                describe_authorization=describers.get(name),
             )
+        )
+
+    for definition in git_tools.TOOL_DEFINITIONS:
+        function = definition["function"]
+        name = function["name"]
+        registry.register(
+            ToolSpec(
+                name=name,
+                description=function["description"],
+                parameters=function["parameters"],
+                executor=git_executors[name],
+            )
+        )
 
     return registry
-
-
-DEFAULT_TOOL_REGISTRY = build_default_registry()

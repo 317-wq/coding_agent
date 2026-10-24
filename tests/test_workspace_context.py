@@ -1,19 +1,17 @@
+"""覆盖工作区上下文与工具实例的绑定关系。"""
+
 from pathlib import Path
 
 import pytest
 
-from app import tools
 from app.core.agent import Agent
 from app.runtime.workspace import WorkspaceContext
+from app.tools.registry import build_default_registry
+from app.tools.result import ToolStatus
 
 
-@pytest.fixture(autouse=True)
-def restore_default_workspace():
-    yield
-    tools.set_workspace(WorkspaceContext.from_path(tools.DEFAULT_WORKSPACE))
-
-
-def test_agent_shares_workspace_context_with_tools(monkeypatch, tmp_path: Path):
+def test_agent_registry_is_bound_to_its_workspace(monkeypatch, tmp_path: Path):
+    """验证 Agent 的默认注册表绑定到它自己的工作区。"""
     marker = tmp_path / "selected-workspace.txt"
     marker.write_text("selected", encoding="utf-8")
     context = WorkspaceContext.from_path(tmp_path)
@@ -22,9 +20,25 @@ def test_agent_shares_workspace_context_with_tools(monkeypatch, tmp_path: Path):
     agent = Agent(workspace=context)
 
     assert agent.workspace is context
-    assert tools.WORKSPACE_CONTEXT is context
-    assert tools.WORKSPACE == tmp_path.resolve()
-    assert tools.read_file(marker.name) == "selected"
+    result = agent.registry.execute("read_file", {"path": marker.name})
+    assert result.status is ToolStatus.SUCCESS
+    assert result.result == "selected"
+
+
+def test_two_workspaces_run_in_parallel_without_global_state(tmp_path: Path):
+    """验证同进程两个工作区的工具与注册表互不影响。"""
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    (left / "name.txt").write_text("left", encoding="utf-8")
+    (right / "name.txt").write_text("right", encoding="utf-8")
+
+    left_registry = build_default_registry(WorkspaceContext.from_path(left))
+    right_registry = build_default_registry(WorkspaceContext.from_path(right))
+
+    assert left_registry.execute("read_file", {"path": "name.txt"}).result == "left"
+    assert right_registry.execute("read_file", {"path": "name.txt"}).result == "right"
 
 
 def test_workspace_context_rejects_parent_path(tmp_path: Path):

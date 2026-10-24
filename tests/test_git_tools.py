@@ -1,19 +1,10 @@
 import subprocess
 from pathlib import Path
 
-import pytest
-
-from app import tools
 from app.runtime.workspace import WorkspaceContext
 from app.tools.git_tools import GitReadTools
 from app.tools.registry import build_default_registry
 from app.tools.result import ToolStatus
-
-
-@pytest.fixture(autouse=True)
-def restore_default_workspace():
-    yield
-    tools.set_workspace(WorkspaceContext.from_path(tools.DEFAULT_WORKSPACE))
 
 
 def _git(path: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -75,8 +66,7 @@ def test_non_repository_is_reported_without_failing_read_tool(tmp_path: Path):
     assert reader.status() == "当前工作区不是 Git 仓库，无法提供 Git 查询结果。"
     assert reader.diff() == "当前工作区不是 Git 仓库，无法提供 Git 查询结果。"
 
-    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
-    registry = build_default_registry()
+    registry = build_default_registry(WorkspaceContext.from_path(tmp_path))
     assert registry.execute("git_status", {}).status is ToolStatus.SUCCESS
 
 
@@ -88,8 +78,7 @@ def test_git_query_outside_workspace_is_rejected(tmp_path: Path):
 
 def test_registry_exposes_only_fixed_read_only_git_tools(tmp_path: Path):
     _repository(tmp_path)
-    tools.set_workspace(WorkspaceContext.from_path(tmp_path))
-    registry = build_default_registry()
+    registry = build_default_registry(WorkspaceContext.from_path(tmp_path))
 
     assert "git_status" in registry.names()
     assert "git_diff" in registry.names()
