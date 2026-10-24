@@ -7,6 +7,7 @@ from typing import Any
 from app.core.planner import TaskPlan
 from app.runtime.explorer import ProjectSnapshot
 from app.tools.result import ToolResult, ToolStatus
+from app.tools.test_result import TestRunResult
 
 MAX_CONTEXT_ENTRY_CHARS = 2_000
 
@@ -29,7 +30,7 @@ class TaskContext:
     plan: TaskPlan | None = None
     current_step_id: int | None = None
     tool_results: tuple[ToolResult, ...] = ()
-    test_results: tuple[str, ...] = ()
+    test_results: tuple[TestRunResult | str, ...] = ()
     truncated_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -58,7 +59,10 @@ class TaskContext:
             "plan": plan,
             "current_step_id": self.current_step_id,
             "tool_results": [result.to_dict() for result in self.tool_results],
-            "test_results": list(self.test_results),
+            "test_results": [
+                item.to_dict() if isinstance(item, TestRunResult) else item
+                for item in self.test_results
+            ],
             "truncated_count": self.truncated_count,
         }
 
@@ -120,15 +124,16 @@ class ContextManager:
         self._trim()
         return self._context
 
-    def add_test_result(self, result: str) -> TaskContext:
-        if not isinstance(result, str) or not result.strip():
+    def add_test_result(self, result: TestRunResult | str) -> TaskContext:
+        if isinstance(result, TestRunResult):
+            value: TestRunResult | str = result
+        elif isinstance(result, str) and result.strip():
+            value = _compact_text(result.strip()) or ""
+        else:
             raise ValueError("测试结果不能为空。")
         self._context = replace(
             self._context,
-            test_results=(
-                *self._context.test_results,
-                _compact_text(result.strip()) or "",
-            ),
+            test_results=(*self._context.test_results, value),
         )
         self._trim()
         return self._context
