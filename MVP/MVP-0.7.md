@@ -68,6 +68,7 @@
 - 已同步至 PROJECT.md v1.41：测试结果改为结构化对象，判定与报告不再解析文本，协议解析仅保留在测试证据模块（对应 R2）。
 - 已同步至 PROJECT.md v1.42：授权收敛到注册表单一入口，删除前提供文件清单、授权决定进 Trace，风险等级只保留 LOW/HIGH（对应 R3）。
 - 已同步至 PROJECT.md v1.43：工具层改为按工作区绑定的实例方法，移除全局工作区、旧分发入口与兼容懒导出（对应 R4）。
+- 已同步至 PROJECT.md v1.44：执行内核拆分为 TaskRunner 与显式阶段，回滚处理合并为单一实现，Agent 仅保留组装与结果汇总（对应 R5）。
 
 ## 4. 本版要实现的模块功能
 
@@ -126,7 +127,7 @@
     4. `git_tools` 同步改造。
   - 完成条件：`grep -rn 'WORKSPACE_CONTEXT\|set_workspace' app/` 无结果；同进程两个不同工作区的 registry 并行执行互不影响（新增测试）；全量测试通过。
 
-- [ ] **R5 · 执行内核拆分 TaskRunner + 状态机**
+- [x] **R5 · 执行内核拆分 TaskRunner + 状态机**
 
   - 现象：`Agent._run_legacy` 共 1114 行（当前 192–1305 行），同时负责 Trace 初始化、快照、复杂度判断、计划、上下文、安全会话、消息组装、工具批次执行、完成判定、三种恢复分支和收尾核验；其中授权回滚处理在完成判定分支与工具分支各写一遍，约 110 行重复。
   - 根因：控制流与状态更新写在同一函数，恢复路径靠复制代码实现。
@@ -140,12 +141,12 @@
 ## 5. 本版验收标准
 
 - [ ] **通用门槛**：每项完成后 `uv run pytest -q` 全绿、`uv run ruff check app tests` 输出 `All checks passed!`。
-- [ ] **行为等价性**（R5 前置）：先新增 golden 用例，以固定 FakeModel 复现 6 个场景（正常完成、测试失败后修复、授权回滚、拒绝回滚、变更集异常、重规划上限），断言 `TaskResult.to_dict()` 全字段一致；该项必须在 R5 动手前完成。
+- [x] **行为等价性**（R5 前置）：先新增 golden 用例，以固定 FakeModel 复现 6 个场景（正常完成、测试失败后修复、授权回滚、拒绝回滚、变更集异常、重规划上限），断言 `TaskResult.to_dict()` 全字段一致；该项必须在 R5 动手前完成。
 - [x] **R1**：删除 `.env` 后 `python -c "import app"` 与 `uv run pytest` 均可用；`MODEL_PROVIDER_1_*` 配置生效且旧 `QWEN_*` 仍可用。
 - [x] **R2**：`grep -rn '测试退出码：' app/` 只剩 `test_evidence` 与 `tools`（生成端），判定端不再解析文本。
 - [x] **R3**：交互式删除单个文件只出现一次 `y` 确认；非交互删除返回明确说明；`RiskLevel.MEDIUM` 要么有行为、要么被删除。
 - [x] **R4**：`grep -rn 'WORKSPACE_CONTEXT\|set_workspace\|execute_tool' app/` 无结果；新增并行工作区用例通过。
-- [ ] **R5**：`grep -n '_run_legacy' app/` 无结果；`wc -l app/core/agent.py` 明显下降；golden 用例全绿。
+- [x] **R5**：`grep -n '_run_legacy' app/` 无结果；`wc -l app/core/agent.py` 明显下降；golden 用例全绿。
 - [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框与基线版本只在验收通过后更新。
 
 ## 6. 本版风险与待办
