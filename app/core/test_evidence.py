@@ -120,6 +120,24 @@ def test_target_covers(parent: str, child: str) -> bool:
     return child_path == parent_path or child_path.startswith(f"{parent_path}/")
 
 
+def structured_test_evidence(
+    results: Sequence[TestRunResult | str],
+) -> tuple[TestEvidence, ...]:
+    """只保留带结构化字段的测试结果，并按目标折叠为最新证据。
+
+    自由文本既不能证明通过也不能证明失败，因此不参与验收核验。
+    """
+    structured = tuple(
+        result
+        for result in results
+        if isinstance(result, TestRunResult)
+        or (isinstance(result, str) and has_structured_test_output(result))
+    )
+    if not structured:
+        return ()
+    return latest_test_evidence(summarize_test_evidence(structured))
+
+
 def latest_test_evidence(
     evidence: Sequence[TestEvidence],
 ) -> tuple[TestEvidence, ...]:
