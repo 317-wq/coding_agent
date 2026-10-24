@@ -46,7 +46,6 @@ class TaskSafetySession:
         self.recovery_attempts = 0
         self.replan_attempts = 0
         self.test_repair_attempts = 0
-        self.test_runs = 0
         self.mutation_generation = 0
         self.last_test_generation: int | None = None
         self.last_failed_test_key: str | None = None
@@ -301,7 +300,6 @@ class TaskSafetySession:
         test_error_kind = None
         test_failed = False
         if tool_name == "run_tests":
-            self.test_runs += 1
             # 首次运行只建立失败基线；之后每次“修改代码后重跑”都算一次
             # 自动修复尝试，无论重跑最终通过还是失败。
             if (
@@ -405,7 +403,6 @@ class TaskSafetySession:
         self.consecutive_tool_failures = 0
         self.replan_attempts = 0
         self.test_repair_attempts = 0
-        self.test_runs = 0
         self.mutation_generation = 0
         self.last_test_generation = None
         self.last_failed_test_key = None
