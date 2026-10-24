@@ -6,6 +6,7 @@ import re
 from collections.abc import Sequence
 
 from app.core.task_result import TestEvidence, TestEvidenceStatus
+from app.tools.test_result import TestRunResult, TestRunStatus
 
 _TARGET = re.compile(r"测试目标：([^\n]+)")
 _EXIT_CODE = re.compile(r"测试退出码：(-?\d+)")
@@ -31,16 +32,37 @@ def has_structured_test_output(raw: str) -> bool:
     return any(field in raw for field in STRUCTURED_TEST_FIELDS)
 
 
+def evidence_from_test_run(run: TestRunResult) -> TestEvidence:
+    """把结构化测试结果转换为可审查证据，不重新解析文本。"""
+    return TestEvidence(
+        target=run.target,
+        status=(
+            TestEvidenceStatus.PASSED
+            if run.status is TestRunStatus.PASSED
+            else TestEvidenceStatus.FAILED
+        ),
+        exit_code=run.exit_code,
+        error_kind=run.error_kind,
+        output=run.output or None,
+    )
+
+
 class TestEvidenceSummarizer:
     """从 run_tests 的结构化文本中提取稳定的测试证据。"""
 
     def summarize(
         self,
-        results: Sequence[str] = (),
+        results: Sequence[TestRunResult | str] = (),
         requested_targets: Sequence[str] = (),
     ) -> tuple[TestEvidence, ...]:
         """汇总测试结果，并为未执行的用户指定目标补充 not_run 证据。"""
-        evidence = [self._parse(result) for result in results if result.strip()]
+        evidence = [
+            evidence_from_test_run(result)
+            if isinstance(result, TestRunResult)
+            else self._parse(result)
+            for result in results
+            if isinstance(result, TestRunResult) or result.strip()
+        ]
         known_targets = {item.target for item in evidence}
         for target in requested_targets:
             normalized = target.strip()
@@ -76,7 +98,7 @@ class TestEvidenceSummarizer:
 
 
 def summarize_test_evidence(
-    results: Sequence[str] = (),
+    results: Sequence[TestRunResult | str] = (),
     requested_targets: Sequence[str] = (),
 ) -> tuple[TestEvidence, ...]:
     """使用默认摘要器生成测试证据。"""
