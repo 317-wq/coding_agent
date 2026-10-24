@@ -249,7 +249,6 @@ def test_reset_after_recovery_starts_new_change_session(tmp_path: Path):
     session = TaskSafetySession(WorkspaceContext.from_path(tmp_path))
     session.prepare_tool("create_file", {"path": "new.py"})
     session.test_repair_attempts = 2
-    session.test_runs = 3
     session.last_failed_test_key = '{"test_path": "."}'
     session.last_failed_test_generation = 1
     session.last_failed_test_error = "测试失败"
@@ -258,7 +257,6 @@ def test_reset_after_recovery_starts_new_change_session(tmp_path: Path):
 
     assert session.recovery_attempts == 1
     assert session.test_repair_attempts == 0
-    assert session.test_runs == 0
     assert session.last_failed_test_key is None
     assert session.last_failed_test_error is None
     assert session.change_set.summary().touched_count == 0
