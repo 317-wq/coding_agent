@@ -572,3 +572,46 @@ def test_agent_blocks_identical_failed_test_until_code_changes(
     )
     assert rejection["details"]["tool_call_id"] == "test-2"
     assert agent.last_result.status.value == "blocked"
+
+
+def test_agent_stops_after_replan_limit(monkeypatch, tmp_path: Path):
+    """验证连续失败时重规划达到上限后停止，而不是耗尽执行轮次。"""
+
+    def failing_edit(path: str):
+        """始终失败且不产生落盘修改，确保持续触发重规划。"""
+        return ToolResult.failure("模拟修改失败")
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec("edit_file", "修改文件", PATH_PARAMETERS, failing_edit))
+
+    class FakeModel:
+        calls = 0
+
+        def chat(self, messages, tools):
+            self.calls += 1
+            return _response(
+                tool_calls=[
+                    _call("edit_file", f"edit-{self.calls}", '{"path":"module.py"}')
+                ]
+            )
+
+    monkeypatch.setattr("app.core.agent.ModelAdapter", FakeModel)
+    agent = Agent(WorkspaceContext.from_path(tmp_path), registry=registry, max_steps=12)
+
+    result = agent.run("修改代码，然后运行测试")
+
+    assert "重规划次数" in result
+    events = agent.last_trace.get_events()
+    replans = [
+        event
+        for event in events
+        if event["event"] == "recovery_decided"
+        and event["details"]["action"] == "replan"
+    ]
+    assert len(replans) == 3
+    assert any(
+        event["event"] == "task_stopped"
+        and "重规划次数" in str(event["details"].get("reason", ""))
+        for event in events
+    )
+
