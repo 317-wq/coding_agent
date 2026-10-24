@@ -56,6 +56,7 @@
 
 每项验收通过后 `PROJECT.md` 升版（从 v1.45 起），并在本节追加“已同步至 PROJECT.md vX.Y”。
 - H1 仅调整仓库约定（行尾、忽略规则、遗留文件），不改变架构、选型或接口，因此不升 `PROJECT.md` 版本。
+- H2 把实现收紧到 `PROJECT.md` 早已要求的“工具返回结构化结果”，没有新增或改变基线契约，因此同样不升版本。
 
 ## 4. 本版要实现的模块功能
 
@@ -78,7 +79,7 @@
     4. 校验 `git ls-files` 与磁盘一致，无未跟踪的文档或测试。
   - 完成条件：`git status` 干净；`file MVP/PROJECT.md` 显示 LF；新增文件无需 `-f`；全量测试与 golden 通过。
 
-- [ ] **H2 · 工具输出统一为 `ToolResult`**
+- [x] **H2 · 工具输出统一为 `ToolResult`**
 
   - 现象：`registry._normalize_output` 靠 `错误：`、`已取消` 这两个中文前缀推断工具状态；工具返回字符串，状态语义不可靠，任何文案调整都可能改变判定。
   - 根因：工具层早期以字符串作为唯一返回类型，状态只能编码进文本。
@@ -104,14 +105,15 @@
 - [ ] **通用门槛**：每项完成后 `uv run pytest -q` 全绿、`uv run ruff check app tests` 输出 `All checks passed!`。
 - [ ] **行为等价**：`uv run pytest tests/test_runner_golden.py -q` 始终 6 passed，快照文件不得修改。
 - [x] **H1**：`git status --short --untracked-files=all` 无输出；`file MVP/PROJECT.md` 不含 CRLF；`git check-ignore MVP/MVP-0.8.md` 返回非零。
-- [ ] **H2**：`grep -rn '_normalize_output' app/` 无结果；新增用例断言“返回字符串的执行器被判为失败”。
+- [x] **H2**：`grep -rn '_normalize_output' app/` 无结果；新增用例断言“返回字符串的执行器被判为失败”。
 - [ ] **H3**：`awk` 统计 `_execute_tool_batch` 行数 ≤ 150；四个辅助方法各有独立 docstring。
-- [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框与基线版本只在验收通过后更新。
+- [x] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框与基线版本只在验收通过后更新。H2 例外：工具契约迁移涉及 14 个文件，拆分后中间状态无法通过测试，因此合并为一次提交。
 
 ## 6. 本版风险与待办
 
 - **风险 · H1 的忽略规则**：移除 `MVP/`、`diagram/` 忽略后，这两类文件会出现在 `git status` 里，需要显式提交。如果你希望继续忽略，请在验收时说明，我会改成“在文档中写明 `git add -f` 约定”而不是改规则。
 - **风险 · H1 的行尾统一**：`PROJECT.md` 从 CRLF 改成 LF 会产生一次整文件 diff，这是唯一一次“看起来改了很多”的提交，之后不会再出现。
 - **风险 · H2 的测试改动面**：大量断言从 `== "字符串"` 改为 `== ToolResult`，属于契约迁移而非放宽断言，每处都需保持原意。
+- **已知行为修正**：目录删除中任一子项失败时，现在整体判为失败；此前会被 `_normalize_output` 当作成功（错误信息混在成功文本里）。这是契约收紧带来的修正，不是回归。
 - **风险 · H3 的搬迁风险**：`_execute_tool_batch` 是执行链路最密集的一段，必须靠 golden 与全量测试守住；拆分期间不允许修改 golden 快照。
 - **待办 · 后续版本**：`run_tests` 的 30 秒超时与 `search_code` 的 10 秒超时参数化；`pyproject.toml` 版本号与 `PROJECT.md` 基线对齐并暴露 `--version`；`Agent` 的 `_run_step`（146 行）可在 H3 完成后同样按阶段细化。
