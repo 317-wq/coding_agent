@@ -64,6 +64,7 @@
 ### 基线同步约定
 
 每项验收通过后 `PROJECT.md` 升版（从 v1.40 起），并在本节追加“已同步至 PROJECT.md vX.Y”。
+- 已同步至 PROJECT.md v1.40：模型配置改为 provider 列表与惰性加载，旧 `QWEN_*` 映射为单个 provider，超限序号启动即报错（对应 R1）。
 
 ## 4. 本版要实现的模块功能
 
@@ -75,7 +76,7 @@
 
 ---
 
-- [ ] **R1 · 配置 provider 泛化与惰性加载**
+- [x] **R1 · 配置 provider 泛化与惰性加载**
 
   - 现象：仓库里没有 `.env` 时 `import app` 直接抛 `ValidationError`（`qwen_api_key`、`qwen_chat_model_1` 必填），新克隆无法收集测试；README 声称支持 `GPT_API_KEY`/`GPT_CHAT_MODEL`，但 `Settings` 没有这些字段且 `extra="ignore"` 会静默丢弃。
   - 根因：`app/runtime/config.py` 在模块级执行 `settings = Settings()`；字段名与单一 provider 绑定。
@@ -137,7 +138,7 @@
 
 - [ ] **通用门槛**：每项完成后 `uv run pytest -q` 全绿、`uv run ruff check app tests` 输出 `All checks passed!`。
 - [ ] **行为等价性**（R5 前置）：先新增 golden 用例，以固定 FakeModel 复现 6 个场景（正常完成、测试失败后修复、授权回滚、拒绝回滚、变更集异常、重规划上限），断言 `TaskResult.to_dict()` 全字段一致；该项必须在 R5 动手前完成。
-- [ ] **R1**：删除 `.env` 后 `python -c "import app"` 与 `uv run pytest` 均可用；`MODEL_PROVIDER_1_*` 配置生效且旧 `QWEN_*` 仍可用。
+- [x] **R1**：删除 `.env` 后 `python -c "import app"` 与 `uv run pytest` 均可用；`MODEL_PROVIDER_1_*` 配置生效且旧 `QWEN_*` 仍可用。
 - [ ] **R2**：`grep -rn '测试退出码：' app/` 只剩 `test_evidence` 与 `tools`（生成端），判定端不再解析文本。
 - [ ] **R3**：交互式删除单个文件只出现一次 `y` 确认；非交互删除返回明确说明；`RiskLevel.MEDIUM` 要么有行为、要么被删除。
 - [ ] **R4**：`grep -rn 'WORKSPACE_CONTEXT\|set_workspace\|execute_tool' app/` 无结果；新增并行工作区用例通过。
