@@ -71,6 +71,7 @@
 - 已同步至 PROJECT.md v1.36：工具能力类别成为步骤匹配与完成核验的唯一依据，只读 Git 查询和未登记工具不参与任何步骤状态流转（对应 D1）。
 - 已同步至 PROJECT.md v1.37：完成判定测试口径改为结构化字段唯一来源，自由文本不参与判定（对应 D2）。
 - 已同步至 PROJECT.md v1.38：变更集异常不再穿透 CLI，统一记录失败事件并把任务结果降级为 `blocked`（对应 D3）。
+- 已同步至 PROJECT.md v1.39：重规划次数单独设上限并在实际重建计划时计数，超限停止，不改变回滚优先级（对应 D4）。
 
 ### 技术选型改动
 
@@ -121,7 +122,7 @@
     3. 依赖 `_build_task_result()` 已有的异常分支把结果降级为 `blocked`，并与正常分支共用同一份 `TaskResult` 构造逻辑。
   - 完成条件：构造出 `ChangeSetError` 的场景下，`Agent.run()` 正常返回字符串、`last_result.status == blocked`、`stop_reason` 含可读原因、Trace 中能找到对应事件。
 
-- [ ] **D4 · 重规划次数上限生效**
+- [x] **D4 · 重规划次数上限生效**
 
   - 现象：任务失败后反复“重规划 → 再失败 → 再重规划”，每次都重扫项目、重建计划和上下文，直到 `max_steps` 才停。`RecoveryPolicy` 的 `max_recovery_attempts` 看起来是收敛保护，实际只管回滚轮次。
   - 根因：`app/core/task_safety.py:396` 只在回滚成功后递增 `recovery_attempts`；`REPLAN` 分支从不递增，`recovery.py:90` 的上限判断对重规划无效。
@@ -171,7 +172,7 @@
   ```
 
 - [x] **D3**：新增集成测试构造 `ChangeSetError` 场景，断言不抛异常、`last_result.status == blocked`、`stop_reason` 非空、Trace 含 `change_set_failed`。
-- [ ] **D4**：新增单元测试断言连续重规划达上限后动作为 `STOP`；集成测试断言 Agent 不会超出重规划上限继续重建计划。
+- [x] **D4**：新增单元测试断言连续重规划达上限后动作为 `STOP`；集成测试断言 Agent 不会超出重规划上限继续重建计划。
 - [ ] **D5**：`grep -rn 'rollback_denied\|test_runs' app/` 无输出。
 - [ ] **文档同步**：每项验收后 `PROJECT.md` 升版并在第 6 节变更记录追加一行；本文件第 3 节追加“已同步至 PROJECT.md vX.Y”。
 - [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框只在验收通过后勾选。
