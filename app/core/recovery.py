@@ -27,6 +27,7 @@ class RecoverySignals:
     recovery_attempts: int = 0
     test_repair_attempts: int = 0
     test_error_kind: str | None = None
+    replan_attempts: int = 0
 
     def __post_init__(self) -> None:
         if self.consecutive_tool_failures < 0:
@@ -35,6 +36,8 @@ class RecoverySignals:
             raise ValueError("恢复尝试次数不能小于 0。")
         if self.test_repair_attempts < 0:
             raise ValueError("测试自动修复次数不能小于 0。")
+        if self.replan_attempts < 0:
+            raise ValueError("重规划次数不能小于 0。")
         if any(not path.strip() for path in self.recoverable_paths):
             raise ValueError("可恢复路径不能为空。")
 
@@ -68,13 +71,17 @@ class RecoveryPolicy:
         *,
         consecutive_failure_threshold: int = 3,
         max_recovery_attempts: int = 2,
+        max_replan_attempts: int = 3,
     ) -> None:
         if consecutive_failure_threshold < 1:
             raise ValueError("连续失败阈值必须大于 0。")
         if max_recovery_attempts < 1:
             raise ValueError("恢复尝试上限必须大于 0。")
+        if max_replan_attempts < 1:
+            raise ValueError("重规划上限必须大于 0。")
         self.consecutive_failure_threshold = consecutive_failure_threshold
         self.max_recovery_attempts = max_recovery_attempts
+        self.max_replan_attempts = max_replan_attempts
 
     def decide(self, signals: RecoverySignals) -> RecoveryDecision:
         """按失败类型、修复轮次和可回滚路径选择下一恢复动作。"""
@@ -129,11 +136,11 @@ class RecoveryPolicy:
                 "import": "项目代码导入失败",
                 "test_code": "测试代码错误",
             }
-            return RecoveryDecision(
-                RecoveryAction.REPLAN,
+            return self._replan(
                 f"{error_labels[signals.test_error_kind]}，保留失败证据并分析相关代码后自动修复。",
                 triggers,
                 paths,
+                signals,
             )
 
         if signals.test_failed and signals.test_repair_attempts >= 2 and paths:
@@ -153,11 +160,11 @@ class RecoveryPolicy:
             )
 
         if signals.test_failed:
-            return RecoveryDecision(
-                RecoveryAction.REPLAN,
+            return self._replan(
                 "测试失败，优先分析并自动修复后重新运行测试。",
                 triggers,
                 paths,
+                signals,
             )
 
         hard_failure = (
@@ -181,18 +188,19 @@ class RecoveryPolicy:
             )
 
         if hard_failure:
-            return RecoveryDecision(
-                RecoveryAction.REPLAN,
+            return self._replan(
                 "执行失败已达到恢复条件，建议放弃当前计划并重新规划。",
                 triggers,
+                (),
+                signals,
             )
 
         if signals.plan_failed:
-            return RecoveryDecision(
-                RecoveryAction.REPLAN,
+            return self._replan(
                 "当前计划步骤失败，保留已有修改并重新规划修复。",
                 triggers,
                 paths,
+                signals,
             )
 
         return RecoveryDecision(
@@ -200,6 +208,23 @@ class RecoveryPolicy:
             "失败次数尚未达到阈值，允许当前循环继续处理。",
             triggers,
         )
+
+    def _replan(
+        self,
+        reason: str,
+        triggers: tuple[str, ...],
+        paths: tuple[str, ...],
+        signals: RecoverySignals,
+    ) -> RecoveryDecision:
+        """在重规划预算内返回重规划；预算耗尽时改为停止。"""
+        if signals.replan_attempts >= self.max_replan_attempts:
+            return RecoveryDecision(
+                RecoveryAction.STOP,
+                f"重规划次数已达到上限 {self.max_replan_attempts} 次，停止自动恢复。",
+                triggers,
+                paths,
+            )
+        return RecoveryDecision(RecoveryAction.REPLAN, reason, triggers, paths)
 
     def _triggers(self, signals: RecoverySignals) -> tuple[str, ...]:
         triggers: list[str] = []
