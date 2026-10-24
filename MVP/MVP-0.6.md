@@ -72,6 +72,7 @@
 - 已同步至 PROJECT.md v1.37：完成判定测试口径改为结构化字段唯一来源，自由文本不参与判定（对应 D2）。
 - 已同步至 PROJECT.md v1.38：变更集异常不再穿透 CLI，统一记录失败事件并把任务结果降级为 `blocked`（对应 D3）。
 - 已同步至 PROJECT.md v1.39：重规划次数单独设上限并在实际重建计划时计数，超限停止，不改变回滚优先级（对应 D4）。
+- D5 仅删除不可达分支与只写不读字段，不改变架构、技术选型或接口约定，因此不升 `PROJECT.md` 版本。
 
 ### 技术选型改动
 
@@ -132,7 +133,7 @@
     3. `RecoveryPolicy.decide()` 在返回 `REPLAN` 前检查上限，超限返回 `STOP`，原因明确为“重规划次数已达上限”。
   - 完成条件：连续触发重规划达到上限后决策变为 `STOP`；既有“两次测试修复 → 建议回滚”流程行为不变；`test_recovery.py`、`test_agent_recovery.py`、`test_mvp04_integration.py` 全部通过。
 
-- [ ] **D5 · 死代码清理**
+- [x] **D5 · 死代码清理**
 
   - 现象：`rollback_denied` 置 `True` 后下一行立即 `return`，两处 `if rollback_denied:` 永远不成立；`test_runs` 只写不读。
   - 根因：`app/core/agent.py:240/485/518/1114/1147`；`app/core/task_safety.py:48/298/399`。
@@ -143,7 +144,7 @@
 
 > 下列命令在项目根目录执行；`PATH` 需包含 `~/.local/bin`（uv 安装位置）。
 
-- [ ] **通用门槛**：每个交付项完成后 `uv run pytest -q` 全绿（当前基线 269 passed），`uv run ruff check app tests` 输出 `All checks passed!`。
+- [x] **通用门槛**：每个交付项完成后 `uv run pytest -q` 全绿（收官 285 passed），`uv run ruff check app tests` 输出 `All checks passed!`。
 - [x] **D1**：以下命令输出 `ok`，且新增回归测试断言 `git_status`/`git_diff` 无法开始或完成任何类型的计划步骤（实现 / 测试编写 / 测试执行 / 阅读）。
 
   ```bash
@@ -173,9 +174,9 @@
 
 - [x] **D3**：新增集成测试构造 `ChangeSetError` 场景，断言不抛异常、`last_result.status == blocked`、`stop_reason` 非空、Trace 含 `change_set_failed`。
 - [x] **D4**：新增单元测试断言连续重规划达上限后动作为 `STOP`；集成测试断言 Agent 不会超出重规划上限继续重建计划。
-- [ ] **D5**：`grep -rn 'rollback_denied\|test_runs' app/` 无输出。
-- [ ] **文档同步**：每项验收后 `PROJECT.md` 升版并在第 6 节变更记录追加一行；本文件第 3 节追加“已同步至 PROJECT.md vX.Y”。
-- [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框只在验收通过后勾选。
+- [x] **D5**：`grep -rn --include='*.py' 'rollback_denied\|self\.test_runs' app/ tests/` 无输出。
+- [x] **文档同步**：每项验收后 `PROJECT.md` 升版并在第 6 节变更记录追加一行；本文件第 3 节追加“已同步至 PROJECT.md vX.Y”。D5 为纯清理，无架构、选型或接口变更，未升版。
+- [x] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框只在验收通过后勾选。
 
 ## 6. 本版风险与待办
 
