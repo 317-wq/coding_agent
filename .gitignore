@@ -1,6 +1,4 @@
 .env
-MVP/
-diagram/
 __pycache__/
 .venv/
 workspace/
