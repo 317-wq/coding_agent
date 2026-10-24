@@ -65,6 +65,7 @@
 
 每项验收通过后 `PROJECT.md` 升版（从 v1.40 起），并在本节追加“已同步至 PROJECT.md vX.Y”。
 - 已同步至 PROJECT.md v1.40：模型配置改为 provider 列表与惰性加载，旧 `QWEN_*` 映射为单个 provider，超限序号启动即报错（对应 R1）。
+- 已同步至 PROJECT.md v1.41：测试结果改为结构化对象，判定与报告不再解析文本，协议解析仅保留在测试证据模块（对应 R2）。
 
 ## 4. 本版要实现的模块功能
 
@@ -89,7 +90,7 @@
     6. `.env.example` 与 README 同步新格式。
   - 完成条件：无 `.env` 环境下 `import app` 与 `uv run pytest` 可用；现有模型故障转移测试全绿；`ModelAdapter(models=[...])` 仍然可用。
 
-- [ ] **R2 · 测试结果结构化**
+- [x] **R2 · 测试结果结构化**
 
   - 现象：`run_tests` 输出“测试目标 / 测试退出码 / 测试结果 / 测试错误类型”四行文本，`app/cli/main.py`、`app/core/completion.py`、`app/core/test_evidence.py`、`app/tools/registry.py`、`app/tools/tools.py` 共 5 处依赖该文本协议。
   - 根因：工具只返回字符串，结构化信息只能编码进文本再被正则解析。
@@ -139,7 +140,7 @@
 - [ ] **通用门槛**：每项完成后 `uv run pytest -q` 全绿、`uv run ruff check app tests` 输出 `All checks passed!`。
 - [ ] **行为等价性**（R5 前置）：先新增 golden 用例，以固定 FakeModel 复现 6 个场景（正常完成、测试失败后修复、授权回滚、拒绝回滚、变更集异常、重规划上限），断言 `TaskResult.to_dict()` 全字段一致；该项必须在 R5 动手前完成。
 - [x] **R1**：删除 `.env` 后 `python -c "import app"` 与 `uv run pytest` 均可用；`MODEL_PROVIDER_1_*` 配置生效且旧 `QWEN_*` 仍可用。
-- [ ] **R2**：`grep -rn '测试退出码：' app/` 只剩 `test_evidence` 与 `tools`（生成端），判定端不再解析文本。
+- [x] **R2**：`grep -rn '测试退出码：' app/` 只剩 `test_evidence` 与 `tools`（生成端），判定端不再解析文本。
 - [ ] **R3**：交互式删除单个文件只出现一次 `y` 确认；非交互删除返回明确说明；`RiskLevel.MEDIUM` 要么有行为、要么被删除。
 - [ ] **R4**：`grep -rn 'WORKSPACE_CONTEXT\|set_workspace\|execute_tool' app/` 无结果；新增并行工作区用例通过。
 - [ ] **R5**：`grep -n '_run_legacy' app/` 无结果；`wc -l app/core/agent.py` 明显下降；golden 用例全绿。
