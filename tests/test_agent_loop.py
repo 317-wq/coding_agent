@@ -7,6 +7,7 @@ from app.runtime.model import ModelAdapter, ModelFallbackExhaustedError
 from app.runtime.workspace import WorkspaceContext
 from app.tools.registry import ToolRegistry, ToolSpec
 from app.tools.result import ToolResult
+from tests.stub_tools import passed_test
 
 PARAMETERS = {
     "type": "object",
@@ -34,7 +35,7 @@ def _call(call_id, name="step"):
 
 def test_complex_task_uses_plan_and_verifies_before_finishing(monkeypatch, tmp_path):
     registry = ToolRegistry()
-    for tool_name in ("read_file", "create_file", "run_tests"):
+    for tool_name in ("read_file", "create_file"):
         registry.register(
             ToolSpec(
                 name=tool_name,
@@ -43,6 +44,14 @@ def test_complex_task_uses_plan_and_verifies_before_finishing(monkeypatch, tmp_p
                 executor=lambda: ToolResult.success("步骤完成"),
             )
         )
+    registry.register(
+        ToolSpec(
+            name="run_tests",
+            description="运行测试",
+            parameters=PARAMETERS,
+            executor=passed_test,
+        )
+    )
 
     class FakeModel:
         def __init__(self):
