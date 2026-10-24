@@ -20,6 +20,7 @@ from typing import Any
 
 from openai.types.chat import ChatCompletionMessageParam
 
+from app.core.acceptance import AcceptanceResult, AcceptanceVerifier
 from app.core.completion import (
     CompletionStatus,
     CompletionVerifier,
@@ -32,6 +33,7 @@ from app.core.recovery import RecoveryAction, RecoveryDecision
 from app.core.requirements import TaskRequirementVerifier
 from app.core.task_safety import TaskConstraintViolation, TaskSafetySession
 from app.core.task_state import PlanStateManager
+from app.core.test_evidence import structured_test_evidence
 from app.runtime.explorer import ProjectExplorer
 from app.runtime.trace import ExecutionTrace
 from app.runtime.workspace import WorkspaceContext
@@ -381,6 +383,7 @@ class TaskRunner:
                     self.context.context.plan or self.plan,
                     self.context.context.tool_results,
                     self.context.context.test_results,
+                    self._acceptance_results(),
                 )
             else:
                 decision = CompletionVerifier().verify_basic(
@@ -1257,6 +1260,7 @@ class TaskRunner:
                 self.context.context.plan or self.plan,
                 self.context.context.tool_results,
                 self.context.context.test_results,
+                self._acceptance_results(),
             )
             requirement_check = TaskRequirementVerifier().verify(task, self.workspace)
             self.trace.record(
@@ -1300,6 +1304,40 @@ class TaskRunner:
         message = result.error or ""
         markers = ("工作目录之外", "工作区之外", "路径越界", "符号链接")
         return any(marker in message for marker in markers)
+
+    def _acceptance_results(self) -> tuple[AcceptanceResult, ...]:
+        """按验收项核验当前证据，并把结果写入 Trace。"""
+        if self.plan is None or self.plan.intent is None:
+            return ()
+        intent = self.plan.intent
+        if not intent.acceptance:
+            return ()
+        results = AcceptanceVerifier().verify(
+            intent,
+            self.workspace,
+            self.safety.change_set.summary(),
+            structured_test_evidence(self.context.context.test_results),
+            workspace_read=self._has_successful_read(),
+        )
+        self.trace.record(
+            "acceptance_checked",
+            passed=[item.item.item_id for item in results if item.passed],
+            failed=[item.item.item_id for item in results if not item.passed],
+            missing=[item.item.text for item in results if not item.passed],
+        )
+        return results
+
+    def _has_successful_read(self) -> bool:
+        """判断本任务是否发生过成功的读取或搜索。"""
+        if self.trace is None:
+            return False
+        read_tools = {"read_file", "list_files", "search_code"}
+        return any(
+            event.get("event") == "tool_call_finished"
+            and event.get("details", {}).get("tool") in read_tools
+            and event.get("details", {}).get("status") == "success"
+            for event in self.trace.events
+        )
 
     def _has_test_sources(self) -> bool:
         """检查工作区是否已经存在可被 pytest 收集的测试源文件。"""
