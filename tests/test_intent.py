@@ -62,3 +62,15 @@ def test_empty_task_is_rejected():
     """验证空任务被拒绝。"""
     with pytest.raises(ValueError, match="任务文本不能为空"):
         extract_intent(" ")
+
+
+def test_read_only_paths_do_not_require_file_exists():
+    """只读任务引用的路径不要求文件存在。"""
+    intent = extract_intent("读取 app.runtime.config.py 并总结当前配置。")
+
+    assert all(
+        item.kind is not EvidenceKind.FILE_EXISTS for item in intent.acceptance
+    )
+    assert any(
+        item.kind is EvidenceKind.WORKSPACE_READ for item in intent.acceptance
+    )
