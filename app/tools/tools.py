@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from app.runtime.workspace import WorkspaceContext
+from app.tools.result import ToolResult
+from app.tools.test_result import TestRunResult, TestRunStatus
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WORKSPACE = (PROJECT_ROOT / "workspace" / "demo").resolve()
@@ -507,12 +509,16 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
 
 
 
-def run_tests(test_path: str = ".") -> str:
-    """运行指定测试文件、目录、pytest node id 或整个工作区。"""
+def run_tests(test_path: str = ".") -> ToolResult:
+    """运行指定测试文件、目录、pytest node id 或整个工作区。
+
+    返回带结构化 ``data`` 的工具结果：文本供模型和日志使用，字段供完成判定、
+    报告与 Trace 使用，避免下游各自解析文本。
+    """
     try:
         path_part, separator, node_part = test_path.partition("::")
         if not path_part:
-            return f"错误：测试路径不存在：{test_path}"
+            return ToolResult.failure(f"测试路径不存在：{test_path}")
         target_path = _resolve_path(path_part)
         canonical_path = WORKSPACE_CONTEXT.relative_path(path_part)
         canonical_target = (
@@ -520,13 +526,13 @@ def run_tests(test_path: str = ".") -> str:
         )
 
         if not target_path.exists():
-            return f"错误：测试路径不存在：{test_path}"
+            return ToolResult.failure(f"测试路径不存在：{test_path}")
 
         if not target_path.is_file() and not target_path.is_dir():
-            return f"错误：测试目标不是文件或目录：{test_path}"
+            return ToolResult.failure(f"测试目标不是文件或目录：{test_path}")
 
         if target_path.is_file() and target_path.suffix != ".py":
-            return f"错误：指定的测试文件必须是 .py 文件：{test_path}"
+            return ToolResult.failure(f"指定的测试文件必须是 .py 文件：{test_path}")
 
         command = [
             sys.executable,
@@ -565,47 +571,57 @@ def run_tests(test_path: str = ".") -> str:
         )
 
         output = (result.stdout + "\n" + result.stderr).strip()
-        status = "通过" if result.returncode == 0 else "失败"
-        error_kind = ""
-        if result.returncode != 0:
+        passed = result.returncode == 0
+        error_kind: str | None = None
+        if not passed:
             lowered = output.lower()
             if result.returncode == 5 or "no tests ran" in lowered:
-                error_kind = "测试错误类型：未发现测试\n"
+                error_kind = "未发现测试"
             elif (
                 "no module named pytest" in lowered
                 or "timeout" in lowered
                 or "测试执行失败" in lowered
             ):
-                error_kind = "测试错误类型：环境错误\n"
+                error_kind = "环境错误"
             elif (
                 "partially initialized module" in lowered
                 or "most likely due to a circular import" in lowered
                 or "importerror:" in lowered
                 or "modulenotfounderror:" in lowered
             ):
-                error_kind = "测试错误类型：代码导入错误\n"
+                error_kind = "代码导入错误"
             elif (
                 "import file mismatch" in lowered
                 or "error collecting" in lowered
             ):
-                error_kind = "测试错误类型：收集冲突\n"
+                error_kind = "收集冲突"
             elif "nameerror" in lowered or "syntaxerror" in lowered:
-                error_kind = "测试错误类型：测试代码\n"
+                error_kind = "测试代码"
             else:
-                error_kind = "测试错误类型：断言失败\n"
+                error_kind = "断言失败"
 
-        return (
+        test_run = TestRunResult(
+            target=canonical_target,
+            exit_code=result.returncode,
+            status=TestRunStatus.PASSED if passed else TestRunStatus.FAILED,
+            error_kind=error_kind,
+            output=output,
+        )
+        text = (
             f"测试目标：{canonical_target}\n"
             f"测试退出码：{result.returncode}\n"
-            f"测试结果：{status}\n"
-            f"{error_kind}"
-            f"{output}"
+            f"测试结果：{'通过' if passed else '失败'}\n"
+            + (f"测试错误类型：{error_kind}\n" if error_kind else "")
+            + output
         )
+        if passed:
+            return ToolResult.success(text, data=test_run)
+        return ToolResult.failure(text, data=test_run)
 
     except subprocess.TimeoutExpired:
-        return f"错误：测试超过 {TEST_TIMEOUT} 秒，已超时终止。"
+        return ToolResult.failure(f"测试超过 {TEST_TIMEOUT} 秒，已超时终止。")
     except (ValueError, OSError) as exc:
-        return f"错误：测试执行失败：{exc}"
+        return ToolResult.failure(f"测试执行失败：{exc}")
 
 
 def _confirm_delete(path: Path) -> bool:
