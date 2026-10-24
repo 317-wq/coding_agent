@@ -2,8 +2,8 @@
   "task": "实现计算器，然后运行测试",
   "status": "stopped",
   "completed": false,
-  "summary": "任务未完成。",
-  "stop_reason": "任务未完成。",
+  "summary": "回滚未获授权：用户拒绝；任务已停止，当前修改已保留，请确认后重试。",
+  "stop_reason": "回滚未获授权：用户拒绝；任务已停止，当前修改已保留，请确认后重试。",
   "changes": {
     "created": [],
     "modified": [

@@ -148,8 +148,8 @@ def test_agent_preserves_changes_and_requests_confirmation_when_rollback_is_deni
 
     result = agent.run("读取配置，然后修改代码，然后运行测试")
 
-    assert "用户拒绝回滚" in result
-    assert "请确认" in result
+    assert "回滚未获授权" in result
+    assert "任务已停止" in result
     assert target.read_text(encoding="utf-8") == "broken"
     assert agent.last_recovery_decision.action is RecoveryAction.SUGGEST_ROLLBACK
 

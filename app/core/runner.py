@@ -1200,12 +1200,16 @@ class TaskRunner:
         )
         if rollback.status is not RollbackStatus.RESTORED:
             if rollback.status is RollbackStatus.CANCELLED:
-                reason = "用户拒绝回滚，当前修改已保留；请确认是否继续执行后续修复。"
+                detail = rollback.reason.rstrip("。；;. ")
+                reason = (
+                    f"{detail}；任务已停止，当前修改已保留，请确认后重试。"
+                )
                 self.trace.record(
                     "user_confirmation_required",
                     reason=reason,
                     **trace_context,
                 )
+                self.trace.record("task_stopped", reason=reason, **trace_context)
                 return reason, "cancelled"
             reason = f"恢复未完成：{rollback.reason}"
             self.trace.record("task_stopped", reason=reason, **trace_context)
