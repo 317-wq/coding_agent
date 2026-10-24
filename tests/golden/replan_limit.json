@@ -1,0 +1,63 @@
+{
+  "task": "修改代码，然后运行测试",
+  "status": "stopped",
+  "completed": false,
+  "summary": "重规划次数已达到上限 3 次，停止自动恢复。",
+  "stop_reason": "重规划次数已达到上限 3 次，停止自动恢复。",
+  "changes": {
+    "created": [],
+    "modified": [],
+    "deleted": [],
+    "unresolved": []
+  },
+  "tests": [],
+  "recovery": [
+    {
+      "action": "stop",
+      "reason": "重规划次数已达到上限 3 次，停止自动恢复。",
+      "authorized": null,
+      "restored_paths": []
+    },
+    {
+      "action": "replan",
+      "reason": "当前计划步骤失败，保留已有修改并重新规划修复。",
+      "authorized": null,
+      "restored_paths": []
+    },
+    {
+      "action": "replan",
+      "reason": "执行失败已达到恢复条件，建议放弃当前计划并重新规划。",
+      "authorized": null,
+      "restored_paths": []
+    }
+  ],
+  "repair_attempts": 0,
+  "model_request_count": 4,
+  "tool_calls": {
+    "calls_started": 4,
+    "calls_finished": 4,
+    "succeeded": 0,
+    "failed": 4,
+    "cancelled": 0,
+    "unfinished": 0
+  },
+  "final_verification": {
+    "verified": true,
+    "comparison_basis": "task_initial_state",
+    "verified_path_count": 1,
+    "net_changed_count": 0,
+    "git_status": "not_repository",
+    "git_dirty": null,
+    "git_changed_count": null,
+    "test_evidence_count": 0,
+    "evidence_sources": [
+      "file_content_hashes",
+      "git_status",
+      "test_trace",
+      "execution_trace"
+    ]
+  },
+  "next_steps": [
+    "补充必要操作或用户授权后继续任务。"
+  ]
+}

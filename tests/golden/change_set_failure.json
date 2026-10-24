@@ -1,0 +1,39 @@
+{
+  "task": "修改代码，然后运行测试",
+  "status": "blocked",
+  "completed": false,
+  "summary": "最终状态核验失败：触碰路径已变为符号链接：module.py",
+  "stop_reason": "最终状态核验失败：触碰路径已变为符号链接：module.py",
+  "changes": {
+    "created": [],
+    "modified": [],
+    "deleted": [],
+    "unresolved": []
+  },
+  "tests": [],
+  "recovery": [],
+  "repair_attempts": 0,
+  "model_request_count": 1,
+  "tool_calls": {
+    "calls_started": 1,
+    "calls_finished": 0,
+    "succeeded": 0,
+    "failed": 0,
+    "cancelled": 0,
+    "unfinished": 1
+  },
+  "final_verification": {
+    "verified": false,
+    "comparison_basis": "task_initial_state",
+    "verified_path_count": 0,
+    "net_changed_count": 0,
+    "git_status": "not_checked",
+    "git_dirty": null,
+    "git_changed_count": null,
+    "test_evidence_count": 0,
+    "evidence_sources": []
+  },
+  "next_steps": [
+    "处理阻塞原因后重新执行任务。"
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "task": "读取配置，然后修改代码，然后运行测试",
+  "status": "completed",
+  "completed": true,
+  "summary": "任务完成，产生 0 个文件变更。",
+  "stop_reason": null,
+  "changes": {
+    "created": [],
+    "modified": [],
+    "deleted": [],
+    "unresolved": []
+  },
+  "tests": [
+    {
+      "target": ".",
+      "status": "passed",
+      "exit_code": 0,
+      "error_kind": null,
+      "output": "1 passed"
+    }
+  ],
+  "recovery": [],
+  "repair_attempts": 0,
+  "model_request_count": 4,
+  "tool_calls": {
+    "calls_started": 3,
+    "calls_finished": 3,
+    "succeeded": 3,
+    "failed": 0,
+    "cancelled": 0,
+    "unfinished": 0
+  },
+  "final_verification": {
+    "verified": true,
+    "comparison_basis": "task_initial_state",
+    "verified_path_count": 0,
+    "net_changed_count": 0,
+    "git_status": "not_repository",
+    "git_dirty": null,
+    "git_changed_count": null,
+    "test_evidence_count": 1,
+    "evidence_sources": [
+      "file_content_hashes",
+      "git_status",
+      "test_trace",
+      "execution_trace"
+    ]
+  },
+  "next_steps": []
+}

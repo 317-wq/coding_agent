@@ -1,0 +1,78 @@
+{
+  "task": "实现计算器，然后运行测试",
+  "status": "stopped",
+  "completed": false,
+  "summary": "任务未完成。",
+  "stop_reason": "任务未完成。",
+  "changes": {
+    "created": [],
+    "modified": [
+      "calculator.py"
+    ],
+    "deleted": [],
+    "unresolved": []
+  },
+  "tests": [
+    {
+      "target": "tests",
+      "status": "failed",
+      "exit_code": 1,
+      "error_kind": "断言失败",
+      "output": "assert 1 == 2"
+    }
+  ],
+  "recovery": [
+    {
+      "action": "suggest_rollback",
+      "reason": "测试自动修复已达到上限 2 次，询问用户是否回滚当前修改。",
+      "authorized": null,
+      "restored_paths": [
+        "calculator.py"
+      ]
+    },
+    {
+      "action": "replan",
+      "reason": "测试失败，优先分析并自动修复后重新运行测试。",
+      "authorized": null,
+      "restored_paths": [
+        "calculator.py"
+      ]
+    },
+    {
+      "action": "rollback:cancelled",
+      "reason": "回滚未获授权：用户拒绝",
+      "authorized": false,
+      "restored_paths": []
+    }
+  ],
+  "repair_attempts": 2,
+  "model_request_count": 6,
+  "tool_calls": {
+    "calls_started": 6,
+    "calls_finished": 6,
+    "succeeded": 3,
+    "failed": 3,
+    "cancelled": 0,
+    "unfinished": 0
+  },
+  "final_verification": {
+    "verified": true,
+    "comparison_basis": "task_initial_state",
+    "verified_path_count": 1,
+    "net_changed_count": 1,
+    "git_status": "not_repository",
+    "git_dirty": null,
+    "git_changed_count": null,
+    "test_evidence_count": 1,
+    "evidence_sources": [
+      "file_content_hashes",
+      "git_status",
+      "test_trace",
+      "execution_trace"
+    ]
+  },
+  "next_steps": [
+    "修复失败测试后重新运行指定测试。",
+    "补充必要操作或用户授权后继续任务。"
+  ]
+}
