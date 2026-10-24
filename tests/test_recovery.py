@@ -172,3 +172,38 @@ def test_signal_and_policy_limits_are_validated():
         RecoveryPolicy(consecutive_failure_threshold=0)
     with pytest.raises(ValueError, match="恢复尝试上限"):
         RecoveryPolicy(max_recovery_attempts=0)
+
+
+def test_replan_attempt_limit_stops_replanning():
+    """验证重规划次数达到上限后停止，而不是继续重建计划。"""
+    policy = RecoveryPolicy(max_replan_attempts=2)
+
+    allowed = policy.decide(RecoverySignals(test_failed=True, replan_attempts=1))
+    capped = policy.decide(RecoverySignals(test_failed=True, replan_attempts=2))
+
+    assert allowed.action is RecoveryAction.REPLAN
+    assert capped.action is RecoveryAction.STOP
+    assert "重规划次数" in capped.reason
+
+
+def test_replan_limit_does_not_override_repair_rollback_priority():
+    """验证重规划预算耗尽不改变“两次修复后建议回滚”的既有优先级。"""
+    decision = decide_recovery(
+        RecoverySignals(
+            test_failed=True,
+            test_repair_attempts=2,
+            recoverable_paths=("app/main.py",),
+            replan_attempts=10,
+        )
+    )
+
+    assert decision.action is RecoveryAction.SUGGEST_ROLLBACK
+
+
+def test_replan_signal_and_policy_limits_are_validated():
+    """验证重规划次数与上限都必须是非负/正数。"""
+    with pytest.raises(ValueError, match="重规划次数"):
+        RecoverySignals(replan_attempts=-1)
+    with pytest.raises(ValueError, match="重规划上限"):
+        RecoveryPolicy(max_replan_attempts=0)
+
