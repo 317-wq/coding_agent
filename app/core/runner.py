@@ -12,6 +12,7 @@
 """
 
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -123,6 +124,7 @@ class TaskRunner:
         self.project_snapshot: Any = None
         self.messages: list[ChatCompletionMessageParam] = []
         self.tool_call_count = 0
+        self.clarification: str | None = None
 
     def _debug_print(self, message: str) -> None:
         """仅在调试模式输出底层执行日志。"""
@@ -132,6 +134,9 @@ class TaskRunner:
     def run(self, task: str) -> str:
         """建立任务状态并逐步推进，直到完成、停止或耗尽轮次。"""
         self._initialize(task)
+        if self.clarification is not None:
+            self.trace.record("task_stopped", reason=self.clarification)
+            return self.clarification
         for step in range(1, self.max_steps + 1):
             answer = self._run_step(step)
             if answer is not None:
@@ -167,6 +172,19 @@ class TaskRunner:
         )
         if self.plan is not None:
             self.trace.record("plan_created", plan=self.plan.to_dict())
+            if self.plan.lint_issues:
+                self.trace.record("plan_linted", issues=list(self.plan.lint_issues))
+            intent = self.plan.intent
+            if intent is not None:
+                self.trace.record(
+                    "intent_extracted",
+                    acceptance=[item.to_dict() for item in intent.acceptance],
+                    open_questions=list(intent.open_questions),
+                )
+                if intent.open_questions and not sys.stdin.isatty():
+                    self.clarification = (
+                        "任务需要确认：" + "；".join(intent.open_questions)
+                    )
         self.state_manager = (
             PlanStateManager(self.plan) if self.plan is not None else None
         )
