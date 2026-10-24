@@ -91,16 +91,12 @@ class ProgressRenderer:
 
 
 def _test_target(details: dict) -> str:
-    """从测试工具结果中提取简短目标名称，优先使用结构化载荷。"""
+    """从结构化测试载荷中提取简短目标名称。"""
     payload = details.get("test")
     if isinstance(payload, dict):
         target = payload.get("target")
         if isinstance(target, str) and target:
             return target
-    text = details.get("result") or details.get("error") or ""
-    for line in str(text).splitlines():
-        if line.startswith("测试目标："):
-            return line.removeprefix("测试目标：").strip()
     return "pytest"
 
 
