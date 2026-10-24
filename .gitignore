@@ -4,8 +4,7 @@ diagram/
 __pycache__/
 .venv/
 workspace/
-tests/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
-diagram/
+*.orig
