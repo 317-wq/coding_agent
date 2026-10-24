@@ -24,6 +24,8 @@ class TaskStatus(StrEnum):
 class TestEvidenceStatus(StrEnum):
     """测试证据的结果状态。"""
 
+    __test__ = False  # 名称以 Test 开头，告知 pytest 不要当作测试类收集
+
     PASSED = "passed"
     FAILED = "failed"
     NOT_RUN = "not_run"
@@ -57,6 +59,8 @@ class ChangeSummary:
 @dataclass(frozen=True)
 class TestEvidence:
     """一次指定测试执行的可审查证据。"""
+
+    __test__ = False  # 名称以 Test 开头，告知 pytest 不要当作测试类收集
 
     target: str
     status: TestEvidenceStatus
