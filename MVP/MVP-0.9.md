@@ -86,12 +86,13 @@ class TaskIntent:
 ### 基线同步约定
 
 每项验收通过后 `PROJECT.md` 升版（从 v1.45 起），并在本节追加“已同步至 PROJECT.md vX.Y”。
+- 已同步至 PROJECT.md v1.45：计划升级为意图 / 验收项 / 步骤三层，并加入可执行性校验（L1–L6）（对应 C1）。
 
 ## 4. 本版要实现的模块功能
 
 > 按依赖顺序排，一项验收通过后才进入下一项。
 
-- [ ] **C1 · 计划契约与可执行性校验**
+- [x] **C1 · 计划契约与可执行性校验**
 
   - 现象：计划第 2 步是一个需求细节，不含动作词，任何工具都无法匹配；它永远 `pending`，把任务锁死在 `incomplete`。
   - 根因：`TaskPlanner._extract_objectives` 按标点切分后直接逐句成步；计划里没有“这条能不能执行”的概念，也没有“什么证据算完成”的类型。
@@ -144,7 +145,7 @@ class TaskIntent:
 - [ ] **通用门槛**：每项完成后 `uv run pytest -q` 全绿、`uv run ruff check app tests` 输出 `All checks passed!`。
 - [ ] **行为等价**：`uv run pytest tests/test_runner_golden.py -q` 保持 6 passed，快照文件不得修改。
 - [ ] **真实复跑**：用第 2 节命令与任务重跑，要求状态 `completed`、`stop_reason` 为空、模型请求 ≤8 次、工作区 `pytest` 通过。
-- [ ] **C1**：`create_task_plan(真实任务)` 无无动作词步骤；`intent.acceptance` 含 `TEST_PASSED` 与两个 `FILE_EXISTS`；lint 六条规则各有用例。
+- [x] **C1**：`create_task_plan(真实任务)` 无无动作词步骤；`intent.acceptance` 含 `TEST_PASSED` 与两个 `FILE_EXISTS`；lint 六条规则各有用例。
 - [ ] **C2**：“只建测试文件不跑测试”判为 `INCOMPLETE`；“跑通测试”判为 `COMPLETE`。
 - [ ] **C3**：回滚取消路径产生 `task_stopped`；`stop_reason` 兜底与步骤号有单元测试。
 - [ ] **交付纪律**：每项单独提交，每个改动文件单独 `git commit`，消息格式 `<类型>: <简短描述>`；复选框与基线版本只在验收通过后更新。
