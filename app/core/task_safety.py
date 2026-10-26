@@ -1,6 +1,7 @@
 """Agent Loop 使用的任务约束、变更会话和重复写入控制。"""
 
 import json
+import re
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -17,6 +18,13 @@ from app.runtime.workspace import WorkspaceContext
 from app.tools.change_set import ChangeSetError, TaskChangeSet
 from app.tools.result import ToolResult, ToolStatus
 from app.tools.rollback import RollbackStatus
+
+_FAILED_TEST_LINE = re.compile(r"^FAILED ", re.MULTILINE)
+
+
+def _count_failed_tests(text: str | None) -> int:
+    """统计测试输出中的 FAILED 行数，用于判断修复是否有进展。"""
+    return len(_FAILED_TEST_LINE.findall(text or ""))
 
 FILE_MUTATION_TOOLS = {"create_file", "edit_file", "delete_file"}
 MUTATION_TOOLS = FILE_MUTATION_TOOLS | {"create_directory", "delete_directory"}
@@ -46,6 +54,8 @@ class TaskSafetySession:
         self.recovery_attempts = 0
         self.replan_attempts = 0
         self.test_repair_attempts = 0
+        self.repair_progress_streak = 0
+        self.total_repair_attempts = 0
         self.mutation_generation = 0
         self.last_test_generation: int | None = None
         self.last_failed_test_key: str | None = None
@@ -308,7 +318,24 @@ class TaskSafetySession:
                 and self.last_failed_test_error is not None
                 and self._has_implementation_mutation_since_test()
             ):
-                self.test_repair_attempts += 1
+                previous_failures = _count_failed_tests(
+                    self.last_failed_test_error
+                )
+                current_failures = (
+                    _count_failed_tests(result.error or "")
+                    if result.status is ToolStatus.FAILURE
+                    else 0
+                )
+                if result.status is ToolStatus.SUCCESS:
+                    self.test_repair_attempts += 1
+                    self.repair_progress_streak += 1
+                elif current_failures < previous_failures:
+                    self.test_repair_attempts = 0
+                    self.repair_progress_streak += 1
+                else:
+                    self.test_repair_attempts += 1
+                    self.repair_progress_streak = 0
+                self.total_repair_attempts += 1
             self.last_test_generation = self.mutation_generation
             self._mutation_paths_since_test.clear()
 
@@ -403,6 +430,8 @@ class TaskSafetySession:
         self.consecutive_tool_failures = 0
         self.replan_attempts = 0
         self.test_repair_attempts = 0
+        self.repair_progress_streak = 0
+        self.total_repair_attempts = 0
         self.mutation_generation = 0
         self.last_test_generation = None
         self.last_failed_test_key = None
