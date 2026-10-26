@@ -289,22 +289,23 @@ class TaskRunner:
                 for definition in available_tools
                 if definition["function"]["name"] != "run_tests"
             ]
-            self.messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "当前开发计划尚未创建任何测试源文件，run_tests 暂不可用。"
-                        "请先完成业务实现并创建 test_*.py 或 conftest.py，"
-                        "不要对空工作区运行测试。"
-                    ),
-                }
+            notice = (
+                "当前开发计划尚未创建任何测试源文件，run_tests 暂不可用。"
+                "请先完成业务实现并创建 test_*.py 或 conftest.py，"
+                "不要对空工作区运行测试。"
             )
-            self.trace.record(
-                "tool_availability_constrained",
-                request_id=request_id,
-                unavailable_tools=("run_tests",),
-                reason="开发任务尚未创建测试源文件。",
-            )
+            if not any(
+                message.get("role") == "system"
+                and message.get("content") == notice
+                for message in self.messages
+            ):
+                self.messages.append({"role": "system", "content": notice})
+                self.trace.record(
+                    "tool_availability_constrained",
+                    request_id=request_id,
+                    unavailable_tools=("run_tests",),
+                    reason="开发任务尚未创建测试源文件。",
+                )
 
         try:
             response = self.model.chat(
@@ -1046,6 +1047,11 @@ class TaskRunner:
                     truncated_count=self.context.context.truncated_count,
                 )
         if self.state_manager is not None:
+            before_status = {
+                step.step_id: step.status.value
+                for step in self.state_manager.state().plan.steps
+            }
+            emitted: set[tuple[int, str]] = set()
             current = self.state_manager.state().current_step_id
             if current is not None and self.state_manager.should_advance_for_tool(
                 current, tool_name, arguments
@@ -1059,6 +1065,7 @@ class TaskRunner:
                     status="completed",
                     reason="后续阶段已开始",
                 )
+                emitted.add((current, "completed"))
                 current = None
             if current is None:
                 pending = self.state_manager.match_step(tool_name, arguments)
@@ -1087,12 +1094,17 @@ class TaskRunner:
                     for step in self.plan.steps
                     if step.step_id == current
                 )
-                self.trace.record(
-                    "plan_step_status_changed",
-                    tool_call_id=tool_call.id,
-                    step_id=current,
-                    status=updated_step.status.value,
-                )
+                status_now = updated_step.status.value
+                if (
+                    (current, status_now) not in emitted
+                    and before_status.get(current) != status_now
+                ):
+                    self.trace.record(
+                        "plan_step_status_changed",
+                        tool_call_id=tool_call.id,
+                        step_id=current,
+                        status=status_now,
+                    )
                 self.context.update_plan(
                     self.plan,
                     self.state_manager.state().current_step_id,
