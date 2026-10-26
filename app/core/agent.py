@@ -15,6 +15,7 @@ from app.core.task_safety import TaskSafetySession
 from app.runtime.model import ModelAdapter
 from app.runtime.trace import ExecutionTrace
 from app.runtime.workspace import WorkspaceContext
+from app.tools.authorization import ToolAuthorizer
 from app.tools.change_set import ChangeSetError, ChangeSetSummary
 from app.tools.change_snapshot import SnapshotError
 from app.tools.registry import ToolRegistry, build_default_registry
@@ -31,11 +32,14 @@ class Agent:
         registry: ToolRegistry | None = None,
         debug: bool = False,
         event_listener: Callable[[dict[str, Any]], None] | None = None,
+        authorizer: ToolAuthorizer | None = None,
     ) -> None:
         """绑定工作区、工具注册表与模型适配器。"""
         self.workspace = workspace
         self.registry = (
-            registry if registry is not None else build_default_registry(workspace)
+            registry
+            if registry is not None
+            else build_default_registry(workspace, authorizer=authorizer)
         )
         self.model = ModelAdapter()
         self.max_steps = max_steps
