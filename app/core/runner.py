@@ -140,6 +140,9 @@ class TaskRunner:
         self.clarification: str | None = None
         self.intent: TaskIntent | None = None
         self._progress_signature: tuple[tuple[int, str], ...] = ()
+        self._last_call_fingerprint: tuple[str, str] | None = None
+        self._last_call_progress: tuple[object, ...] | None = None
+        self._last_call_status: ToolStatus | None = None
         self._stalled_rounds = 0
 
     def _debug_print(self, message: str) -> None:
@@ -159,7 +162,7 @@ class TaskRunner:
                 return answer
             stalled = self._detect_stall()
             if stalled is not None:
-                return stalled
+                return self._finish_at_step_limit(task, stalled_reason=stalled)
         return self._finish_at_step_limit(task)
 
     def _initialize(self, task: str) -> None:
@@ -807,6 +810,41 @@ class TaskRunner:
                 }
             )
             return _PreparedCall(_CallDecision.ABORT)
+        fingerprint = (
+            tool_name,
+            json.dumps(arguments, sort_keys=True, ensure_ascii=False),
+        )
+        progress = (
+            self._plan_signature(),
+            self.safety.mutation_generation,
+        )
+        if (
+            fingerprint == self._last_call_fingerprint
+            and progress == self._last_call_progress
+            and self._last_call_status is ToolStatus.SUCCESS
+        ):
+            self.trace.record(
+                "repeated_call_detected",
+                tool=tool_name,
+                tool_call_id=tool_call.id,
+                reason="相同参数重复调用且没有推进",
+            )
+            skipped = ToolResult.success(
+                "已跳过：该调用与上一次完全相同且没有产生任何进展。"
+                "请更换策略，例如先读取相关文件、修改实现或调整测试目标。"
+            )
+            if self.context is not None:
+                self.context.add_tool_result(skipped)
+            self.messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": skipped.to_json(),
+                }
+            )
+            return _PreparedCall(_CallDecision.SKIP)
+        self._last_call_fingerprint = fingerprint
+        self._last_call_progress = progress
         return _PreparedCall(_CallDecision.EXECUTE, arguments)
 
     def _execute_tool_call(
@@ -890,6 +928,7 @@ class TaskRunner:
         返回 ``(结束原因, 是否中断本批次)``：结束原因非空时任务应立即返回，
         否则按第二项决定是本批次中断还是继续下一个调用。
         """
+        self._last_call_status = tool_result.status
         self.tool_call_count += 1
         reported_mutation = self.safety.record_completed_mutation(
             tool_name, arguments, tool_result
@@ -1279,8 +1318,10 @@ class TaskRunner:
         )
         return None, "restored"
 
-    def _finish_at_step_limit(self, task: str) -> str:
-        """轮次耗尽时用已有证据做确定性收尾核验。"""
+    def _finish_at_step_limit(
+        self, task: str, stalled_reason: str | None = None
+    ) -> str:
+        """轮次耗尽或停滞时用已有证据做确定性收尾核验。"""
         self._satisfy_conditional_steps()
         if self.plan is not None and self.context is not None:
             final_decision = verify_completion(
@@ -1303,15 +1344,26 @@ class TaskRunner:
             )
             if final_decision.completed and requirement_check.passed:
                 answer = (
-                    "最后一个允许轮次中的工具已完成任务，"
-                    "控制层已根据计划、测试和明确需求证据完成收尾核验。"
+                    "计划步骤与验收证据均已满足，控制层已自动收尾。"
+                    if stalled_reason is not None
+                    else (
+                        "最后一个允许轮次中的工具已完成任务，"
+                        "控制层已根据计划、测试和明确需求证据完成收尾核验。"
+                    )
                 )
                 self.trace.record(
                     "task_completed",
                     answer=answer,
-                    reason="verified_at_step_limit",
+                    reason=(
+                        "stalled_but_complete"
+                        if stalled_reason is not None
+                        else "verified_at_step_limit"
+                    ),
                 )
                 return answer
+            if stalled_reason is not None:
+                self.trace.record("task_stopped", reason=stalled_reason)
+                return stalled_reason
 
         self.trace.record(
             "task_stopped",
@@ -1360,6 +1412,15 @@ class TaskRunner:
                 self.plan, self.state_manager.state().current_step_id
             )
 
+    def _plan_signature(self) -> tuple[tuple[int, str], ...]:
+        """返回计划步骤状态签名，用于判断是否有推进。"""
+        if self.state_manager is None:
+            return ()
+        return tuple(
+            (step.step_id, step.status.value)
+            for step in self.state_manager.state().plan.steps
+        )
+
     def _detect_stall(self) -> str | None:
         """连续多轮没有推进计划步骤时停止，避免空转到轮次上限。"""
         if self.state_manager is None:
@@ -1387,13 +1448,7 @@ class TaskRunner:
         if pending:
             ids = "、".join(str(step_id) for step_id in pending)
             reason += f"（待处理步骤：{ids}）"
-        reason += "；请检查计划或补充输入后重试。"
-        self.trace.record(
-            "task_stopped",
-            reason=reason,
-            stalled_rounds=self._stalled_rounds,
-        )
-        return reason
+        return reason + "；请检查计划或补充输入后重试。"
 
     def _acceptance_results(self) -> tuple[AcceptanceResult, ...]:
         """按验收项核验当前证据，并把结果写入 Trace。"""
