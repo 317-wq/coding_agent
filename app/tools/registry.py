@@ -180,14 +180,17 @@ TOOL_RISK_LEVELS = {
 }
 
 
-def build_default_registry(workspace: WorkspaceContext) -> ToolRegistry:
+def build_default_registry(
+    workspace: WorkspaceContext,
+    authorizer: ToolAuthorizer | None = None,
+) -> ToolRegistry:
     """按受控工作区建立内置工具注册表。
 
     工具实例绑定 workspace，注册表只保存规格与执行入口，因此同一进程可以
     为不同工作区各建一个注册表并行执行。
     """
 
-    registry = ToolRegistry()
+    registry = ToolRegistry(authorizer=authorizer)
     builtin = tools.WorkspaceTools(workspace)
     git_reader = GitReadTools(workspace)
     describers: dict[str, AuthorizationDescriber] = {
