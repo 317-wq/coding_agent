@@ -20,6 +20,7 @@ from app.cli.report import render_task_report
 from app.core.agent import Agent
 from app.core.task_result import TaskResult, TestEvidenceStatus
 from app.runtime.workspace import WorkspaceContext
+from app.tools.authorization import AutoApproveAuthorizer, ToolAuthorizer
 
 
 class OutputFormat(StrEnum):
@@ -236,6 +237,7 @@ def _run_session(
     max_steps: int,
     max_tool_calls: int,
     debug: bool,
+    authorizer: ToolAuthorizer | None = None,
 ) -> None:
     """运行可连续接收任务的交互式 Agent 会话。"""
 
@@ -254,6 +256,7 @@ def _run_session(
         max_tool_calls=max_tool_calls,
         debug=debug,
         event_listener=None if debug else progress,
+        authorizer=authorizer,
     )
 
     while True:
@@ -346,6 +349,14 @@ def run(
             help="显示完整 Trace、模型轮次和工具调用日志。",
         ),
     ] = False,
+    auto_approve: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="自动授权高风险操作与回滚，仅用于受控环境。",
+        ),
+    ] = False,
 ) -> None:
     """解析参数并启动交互式 Agent 会话。"""
 
@@ -355,6 +366,7 @@ def run(
         max_steps,
         max_tool_calls,
         debug,
+        AutoApproveAuthorizer() if auto_approve else None,
     )
 
 

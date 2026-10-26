@@ -16,6 +16,7 @@ from app.core.task_result import (
 from app.core.task_result import (
     TestEvidenceStatus as EvidenceStatus,
 )
+from app.tools.authorization import AutoApproveAuthorizer
 
 runner = CliRunner()
 
@@ -24,7 +25,9 @@ def test_cli_uses_workspace_and_custom_limits(monkeypatch, tmp_path: Path):
     """验证 Typer 将工作区和资源上限传给交互会话。"""
     captured = {}
 
-    def fake_session(workspace, output_format, max_steps, max_tool_calls, debug):
+    def fake_session(
+        workspace, output_format, max_steps, max_tool_calls, debug, authorizer=None
+    ):
         """记录解析后的 CLI 参数，避免测试启动真实 Agent。"""
         captured.update(
             workspace=workspace,
@@ -32,6 +35,7 @@ def test_cli_uses_workspace_and_custom_limits(monkeypatch, tmp_path: Path):
             max_steps=max_steps,
             max_tool_calls=max_tool_calls,
             debug=debug,
+            authorizer=authorizer,
         )
 
     monkeypatch.setattr(main, "_run_session", fake_session)
@@ -56,6 +60,7 @@ def test_cli_uses_workspace_and_custom_limits(monkeypatch, tmp_path: Path):
     assert captured["max_steps"] == 30
     assert captured["max_tool_calls"] == 60
     assert captured["debug"] is True
+    assert captured["authorizer"] is None
 
 
 def test_cli_rejects_missing_workspace(tmp_path: Path):
@@ -166,3 +171,21 @@ def test_progress_renderer_distinguishes_directories_and_failed_tests():
     assert "创建目录 expense_tracker" in output
     assert "! 测试未通过" in output
     assert "✓ 测试未通过" not in output
+
+
+def test_cli_yes_enables_auto_approve(monkeypatch, tmp_path: Path):
+    """验证 --yes 注入自动授权器。"""
+    captured = {}
+
+    def fake_session(
+        workspace, output_format, max_steps, max_tool_calls, debug, authorizer=None
+    ):
+        """记录授权器参数，避免测试启动真实 Agent。"""
+        captured["authorizer"] = authorizer
+
+    monkeypatch.setattr(main, "_run_session", fake_session)
+
+    result = runner.invoke(main.app, ["--workspace", str(tmp_path), "-y"])
+
+    assert result.exit_code == 0
+    assert isinstance(captured["authorizer"], AutoApproveAuthorizer)
