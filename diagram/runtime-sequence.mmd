@@ -1,0 +1,56 @@
+%% 单次任务的真实调用顺序（对应 app/core/runner.py 与 app/core/agent.py）。
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant CLI as cli/main.py
+    participant A as Agent
+    participant R as TaskRunner
+    participant P as Planner + Lint
+    participant S as TaskSafetySession
+    participant M as ModelAdapter
+    participant Reg as ToolRegistry
+    participant C as CompletionVerifier
+    participant Agg as TaskResultAggregator
+
+    U->>CLI: 输入任务
+    CLI->>A: run(task)
+    A->>R: run(task)
+
+    Note over R: _initialize()
+    R->>R: ProjectExplorer 快照 + Git 基线
+    R->>P: create_task_plan（intent → lint → steps）
+    P-->>R: TaskPlan（含 acceptance / conditional / phase）
+    R->>S: 建立约束、变更集与测试门控
+    R->>R: 记录 plan_created / plan_linted / intent_extracted
+
+    loop 每一轮（max_steps）
+        R->>R: _run_step：装配可用工具（测试源文件不足时隐藏 run_tests）
+        R->>M: chat(messages, tools)
+        M-->>R: tool_calls 或 文字结论
+
+        alt 返回工具调用
+            R->>R: _prepare_tool_call<br/>解析参数 / 写去重 / 预算 / 强制重跑 / 重复调用拦截
+            R->>S: validate_tool + prepare_tool（写前快照）
+            R->>Reg: execute(tool, args)
+            Reg-->>R: ToolResult
+            R->>R: _apply_tool_result<br/>上下文 / 步骤状态 / 变更记账
+            R->>S: observe(...) 生成恢复决策
+            alt 重规划
+                R->>P: 重建计划并继承已完成步骤
+            else 建议回滚
+                R->>Reg: AuthorizedRollback（--yes 或交互授权）
+            end
+        else 返回文字结论
+            R->>R: _handle_model_answer<br/>条件步骤满足 → 完成判定
+            R->>C: verify(步骤 + 工具/测试证据 + 验收项)
+            C-->>R: complete / incomplete / blocked
+            alt 未完成
+                R->>S: 恢复决策（重规划 / 回滚 / 熔断 / 停滞停止）
+            end
+        end
+    end
+
+    R->>Agg: aggregate_task_result（变更 / 测试 / 恢复 / Trace）
+    Agg-->>A: TaskResult
+    A-->>CLI: 文本
+    CLI->>CLI: render_task_report

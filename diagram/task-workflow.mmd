@@ -1,50 +1,56 @@
-%% Mini Coding Agent 单次任务的主要工作流。
-%% 仅包含当前代码已实现的路径；长期记忆和评测等远期模块不在图中。
+%% 单次任务的完整工作流（MVP-0.9 之后，含 C1–C6 行为）。
 flowchart TD
-    Start([用户启动 CLI]) --> Input[指定工作区并输入任务]
-    Input --> Init[解析工作区<br/>创建 Agent 与 Trace]
-    Init --> Explore[探索项目快照<br/>读取 Git 基线]
-    Explore --> Classify{判断任务复杂度}
-    Classify -->|需要规划| Plan[生成结构化计划与步骤状态]
-    Classify -->|简单任务| Context[初始化任务上下文]
-    Plan --> Context
-    Context --> Safety[建立任务安全会话<br/>记录约束与变更基线]
-    Safety --> Request[组装消息与可用工具]
-    Request --> Model[Model Adapter 请求模型]
-    Model --> Response{模型返回什么？}
+    Start([用户启动 CLI]) --> WS[解析工作区<br/>创建 Agent 与 Trace]
+    WS --> Explore[项目快照 + Git 基线]
+    Explore --> Classify{复杂度}
 
-    Response -->|工具调用| Parse[解析调用参数]
-    Parse --> Guard[任务级约束与工具可用性检查]
-    Guard --> Registry[工具注册表校验参数<br/>检查风险与授权]
-    Registry --> Allowed{允许执行？}
-    Allowed -->|拒绝 / 取消 / 失败| ToolFailure[记录结构化失败结果与 Trace]
-    Allowed -->|允许| Snapshot[写操作按需保存原始状态快照]
-    Snapshot --> Execute[执行文件 / 搜索 / 测试 / Git 工具]
-    Execute --> Observe[记录工具结果<br/>更新上下文、步骤与变更集]
-    ToolFailure --> Observe
-    Observe --> StopBatch{本次调用失败或取消？}
-    StopBatch -->|是| Request
-    StopBatch -->|否，仍有同批调用| Parse
-    StopBatch -->|否，批次结束| Request
+    Classify -->|简单| Ctx[建立上下文与安全会话]
+    Classify -->|复杂| Intent[抽取意图：目标 / 范围 / 不做 / 验收项]
+    Intent --> Plan[生成步骤并做 L1–L6 校验<br/>不可执行片段合并]
+    Plan --> Questions{有待确认问题<br/>且非交互？}
+    Questions -->|是| AskStop[执行前停止<br/>stop_reason 给出问题]
+    Questions -->|否| Ctx
 
-    Response -->|直接总结| Check[核验计划完成条件<br/>核验明确需求]
-    Check --> Complete{所有必要条件满足？}
-    Complete -->|否| TestPending{是否有失败测试修改尚未重跑？}
-    TestPending -->|是| ForceTest[只开放对应测试目标<br/>必须先重跑验证]
-    ForceTest --> Request
-    TestPending -->|否| Recover[按失败证据生成恢复决策]
-    Recover --> RecoverAction{恢复决策}
-    RecoverAction -->|继续 / 重规划| Replan[保留有效修改<br/>刷新或重建计划与上下文]
-    Replan --> Request
-    RecoverAction -->|建议回滚| AuthorizeRollback{用户授权回滚？}
-    AuthorizeRollback -->|拒绝| Blocked[保留当前修改并停止等待确认]
-    AuthorizeRollback -->|同意| Rollback[仅恢复本任务触碰路径]
-    Rollback --> VerifyRollback{恢复后净变化为零？}
-    VerifyRollback -->|否| Blocked
-    VerifyRollback -->|是| Replan
-    RecoverAction -->|停止 / 不可恢复| Blocked
+    Ctx --> Tools[装配可用工具<br/>无测试源文件时隐藏 run_tests]
+    Tools --> Model[请求模型]
+    Model --> Resp{返回类型}
 
-    Complete -->|是| Final[重新核验文件变化、Git 状态、测试证据与 Trace]
-    Final --> Aggregate[聚合 TaskResult<br/>生成中文文本或 JSON 报告]
-    Aggregate --> End([CLI 展示结果])
-    Blocked --> Final
+    Resp -->|工具调用| Parse[解析参数]
+    Parse --> Repeat{相同工具+参数<br/>且无推进？}
+    Repeat -->|是| Skip[跳过执行<br/>回注“请更换策略”]
+    Skip --> Tools
+    Repeat -->|否| Dedup{重复写 / 预算耗尽 /<br/>强制先跑测试？}
+    Dedup -->|命中| Reject[结构化拒绝或取消结果]
+    Dedup -->|通过| Guard[约束校验 + 写前快照]
+    Guard --> Auth{高风险操作？}
+    Auth -->|--yes 或交互同意| Exec[执行工具]
+    Auth -->|拒绝| Reject
+    Exec --> Apply[记录结果<br/>上下文 / 步骤状态 / 变更集]
+    Reject --> Apply
+    Apply --> Recover{恢复决策}
+    Recover -->|重规划| Replan[继承已完成步骤<br/>刷新计划与上下文]
+    Recover -->|建议回滚| Rollback{授权回滚？}
+    Recover -->|停止 / 熔断| Stop[保留证据并停止]
+    Rollback -->|拒绝| Stop
+    Rollback -->|同意| Restore[恢复本任务触碰路径] --> Replan
+    Replan --> Tools
+    Apply --> Stall{连续 4 轮<br/>无步骤推进 / 无新读取 / 无写操作？}
+    Stall -->|是| FinishCheck[用现有证据做收尾核验]
+    Stall -->|否| Tools
+
+    Resp -->|文字结论| Cond[测试全部通过时<br/>满足条件步骤]
+    Cond --> Check[完成判定<br/>步骤 + 工具/测试证据 + 必需验收项]
+    Check --> Done{全部满足？}
+    Done -->|是| Finish[最终状态核验]
+    Done -->|否| Budget{修复预算}
+    Budget -->|失败数下降| Replan2[重置预算并重规划]
+    Budget -->|连续 2 次无进展| Rollback
+    Budget -->|累计 6 次仍未通过| Stop
+    Replan2 --> Tools
+
+    FinishCheck --> Done
+    Finish --> Aggregate[聚合 TaskResult]
+    Stop --> Aggregate
+    Aggregate --> Report[文本 / JSON 报告]
+    Report --> End([CLI 展示])
+    AskStop --> End
