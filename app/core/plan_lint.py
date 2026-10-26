@@ -54,11 +54,15 @@ class LintResult:
 
 
 def phase_of(objective: str) -> str | None:
-    """判断步骤目标属于哪个可执行阶段；无法判断时返回 None。"""
-    for phase, pattern in _PHASE_PATTERNS:
-        if pattern.search(objective):
-            return phase
-    return None
+    """判断步骤目标属于哪个可执行阶段；多个动作并存时以最先出现者为准。"""
+    matches = [
+        (match.start(), phase)
+        for phase, pattern in _PHASE_PATTERNS
+        if (match := pattern.search(objective)) is not None
+    ]
+    if not matches:
+        return None
+    return min(matches)[1]
 
 
 def _normalize(value: str) -> str:
