@@ -29,6 +29,15 @@ class ToolAuthorizer(Protocol):
     ) -> AuthorizationDecision: ...
 
 
+class AutoApproveAuthorizer:
+    """自动授权所有高风险工具，仅用于非交互演示或受控环境。"""
+
+    def authorize(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> AuthorizationDecision:
+        return AuthorizationDecision.allow("已按 --yes 自动授权。")
+
+
 class ConsoleAuthorizer:
     """通过终端输入 y 对高风险工具进行明确授权。"""
 
