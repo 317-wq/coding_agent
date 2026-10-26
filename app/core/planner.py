@@ -40,6 +40,7 @@ class PlanStep:
     status: PlanStepStatus = PlanStepStatus.PENDING
     acceptance_ids: tuple[int, ...] = ()
     conditional: bool = False
+    phase: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +50,7 @@ class PlanStep:
             "status": self.status.value,
             "acceptance_ids": list(self.acceptance_ids),
             "conditional": self.conditional,
+            "phase": self.phase,
         }
 
 
@@ -112,6 +114,7 @@ class TaskPlanner:
                 acceptance_ids=self._bind_acceptance(objective, intent),
                 conditional=repair_conditional
                 and phase_of(objective) == "implement",
+                phase=phase_of(objective),
             )
             for index, objective in enumerate(objectives, start=1)
         )
