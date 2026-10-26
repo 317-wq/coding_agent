@@ -122,7 +122,22 @@ class PlanStateManager:
         if capability in {ToolCapability.VCS, ToolCapability.UNKNOWN}:
             return False
 
-        text = self._step(step_id).objective
+        step = self._step(step_id)
+        phase = getattr(step, "phase", None)
+        text = step.objective
+
+        if phase == "read" and capability is not ToolCapability.READ:
+            return False
+        # 合并步骤（“实现…；运行测试”）允许由测试执行完成；
+        # 纯实现步骤必须由写操作完成，避免读取类工具误判完成。
+        if (
+            phase == "implement"
+            and capability is not ToolCapability.MUTATE
+            and not ("运行" in text or "验证" in text)
+        ):
+            return False
+        if phase == "test_run" and capability is not ToolCapability.TEST:
+            return False
         path = str(arguments.get("path", "")).lower()
         if "阅读" in text or "读取" in text or "项目结构" in text:
             return capability is ToolCapability.READ
