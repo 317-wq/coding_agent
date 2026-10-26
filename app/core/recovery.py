@@ -26,6 +26,7 @@ class RecoverySignals:
     recoverable_paths: tuple[str, ...] = ()
     recovery_attempts: int = 0
     test_repair_attempts: int = 0
+    total_repair_attempts: int = 0
     test_error_kind: str | None = None
     replan_attempts: int = 0
 
@@ -72,6 +73,7 @@ class RecoveryPolicy:
         consecutive_failure_threshold: int = 3,
         max_recovery_attempts: int = 2,
         max_replan_attempts: int = 3,
+        max_total_repair_attempts: int = 6,
     ) -> None:
         if consecutive_failure_threshold < 1:
             raise ValueError("连续失败阈值必须大于 0。")
@@ -82,6 +84,7 @@ class RecoveryPolicy:
         self.consecutive_failure_threshold = consecutive_failure_threshold
         self.max_recovery_attempts = max_recovery_attempts
         self.max_replan_attempts = max_replan_attempts
+        self.max_total_repair_attempts = max_total_repair_attempts
 
     def decide(self, signals: RecoverySignals) -> RecoveryDecision:
         """按失败类型、修复轮次和可回滚路径选择下一恢复动作。"""
@@ -143,6 +146,19 @@ class RecoveryPolicy:
                 signals,
             )
 
+        if (
+            signals.test_failed
+            and signals.total_repair_attempts
+            >= self.max_total_repair_attempts
+        ):
+            return RecoveryDecision(
+                action=RecoveryAction.STOP,
+                reason=(
+                    f"自动修复累计 {signals.total_repair_attempts} 次仍未通过，"
+                    "已熔断停止，请人工检查。"
+                ),
+                triggers=("自动修复熔断",),
+            )
         if signals.test_failed and signals.test_repair_attempts >= 2 and paths:
             return RecoveryDecision(
                 RecoveryAction.SUGGEST_ROLLBACK,
