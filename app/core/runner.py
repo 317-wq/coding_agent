@@ -1460,6 +1460,16 @@ class TaskRunner:
         if pending:
             ids = "、".join(str(step_id) for step_id in pending)
             reason += f"（待处理步骤：{ids}）"
+        if self.context is not None:
+            tests = structured_test_evidence(self.context.context.test_results)
+            failed_tests = [
+                evidence
+                for evidence in tests
+                if evidence.status is TestEvidenceStatus.FAILED
+            ]
+            if failed_tests:
+                targets = "、".join(evidence.target for evidence in failed_tests)
+                reason += f"；最近一次测试仍有失败：{targets}"
         return reason + "；请检查计划或补充输入后重试。"
 
     def _acceptance_results(self) -> tuple[AcceptanceResult, ...]:
